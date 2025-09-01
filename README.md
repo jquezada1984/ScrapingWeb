@@ -13,14 +13,7 @@ scraping_web/
 │   ├── rabbitmq_client.py        # Cliente para RabbitMQ externo
 │   ├── scraper.py                # Motor de scraping web
 │   └── scraping_worker.py        # Worker principal que coordina todo
-├── examples/                     # Archivos de ejemplo
-│   ├── __init__.py
-│   ├── urls_example.txt          # URLs de prueba
-│   └── selectors_example.json    # Selectores CSS de ejemplo
-├── main.py                       # Script principal para ejecutar el worker
-├── publisher.py                  # Script para publicar tareas
-├── test_connection.py            # Script para probar conexiones
-├── quick_start.py                # Script de inicio rápido
+├── run_production_worker.py      # Worker de producción principal (SIEMPRE ACTIVO)
 ├── requirements.txt              # Dependencias de Python
 ├── config.env.example            # Ejemplo de configuración local
 ├── docker.env.example            # Ejemplo de configuración Docker
@@ -206,103 +199,106 @@ python publisher.py --file urls.txt --selenium
 python publisher.py --url "https://ejemplo.com" --selectors selectors.json
 ```
 
-### 🎯 Prueba Rápida Completa
+### 🎯 Ejecución en Producción
 ```bash
-# Ejecutar prueba completa del sistema
-python quick_start.py
+# Ejecutar worker de producción (SIEMPRE ACTIVO)
+python run_production_worker.py
 ```
 
 ### 🔄 Flujo de Trabajo del Sistema
 
-1. **Publicación**: Las tareas se publican en RabbitMQ usando `publisher.py`
-2. **Procesamiento**: El worker (`main.py`) consume mensajes de la cola
-3. **Scraping**: Se extraen datos de las URLs especificadas usando `scraper.py`
-4. **Almacenamiento**: Los resultados se guardan en SQL Server usando `database.py`
-5. **Confirmación**: Se confirma el procesamiento exitoso
+1. **Recepción**: El worker recibe mensajes de aseguradoras desde RabbitMQ
+2. **Procesamiento**: Extrae el `NombreCompleto` del mensaje
+3. **Búsqueda**: Consulta la tabla `urls_automatizacion` en SQL Server
+4. **Caché**: Almacena URLs en memoria para futuras consultas
+5. **Resultado**: Combina información del mensaje con la URL encontrada
 
 ### 📋 Comandos de Ejemplo
 
 ```bash
-# Probar conexiones
-python test_connection.py
+# Iniciar worker de producción (SIEMPRE ACTIVO)
+python run_production_worker.py
 
-# Iniciar worker
-python main.py
-
-# Publicar tarea única
-python publisher.py --url "https://httpbin.org/html"
-
-# Publicar múltiples URLs
-python publisher.py --file examples/urls_example.txt
-
-# Publicar con Selenium
-python publisher.py --url "https://ejemplo.com" --selenium
-
-# Publicar con selectores personalizados
-python publisher.py --url "https://ejemplo.com" --selectors examples/selectors_example.json
-
-# Prueba rápida completa
-python quick_start.py
+# El worker estará siempre esperando mensajes
+# Presiona Ctrl+C para detenerlo de forma graceful
 ```
 
 ## 📊 Estructura de la Base de Datos
 
-### Tabla: scraping_results
+### Tabla: urls_automatizacion
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | INT | ID único autoincremental |
-| url | NVARCHAR(500) | URL procesada |
-| title | NVARCHAR(500) | Título de la página |
-| content | NVARCHAR(MAX) | Contenido extraído |
-| status_code | INT | Código de respuesta HTTP |
-| error_message | NVARCHAR(1000) | Mensaje de error (si aplica) |
-| selenium_used | BIT | Si se usó Selenium |
-| timestamp | DATETIME2 | Fecha/hora del procesamiento |
-| processing_time | FLOAT | Tiempo de procesamiento en segundos |
-| extracted_data | NVARCHAR(MAX) | Datos extraídos en formato JSON |
+| id | UNIQUEIDENTIFIER | ID único de la aseguradora |
+| nombre | NVARCHAR(255) | Nombre completo de la aseguradora |
+| url_login | TEXT | URL de login de la aseguradora |
+| url_destino | TEXT | URL de destino (opcional) |
+| descripcion | NTEXT | Descripción de la aseguradora |
+| fecha_creacion | DATETIME | Fecha de creación del registro |
 
-## 📁 Archivos de Ejemplo
+### Formato de Mensajes RabbitMQ
 
-### URLs de Prueba (`examples/urls_example.txt`)
-```
-https://httpbin.org/html
-https://httpbin.org/json
-https://httpbin.org/xml
-https://example.com
-https://httpbin.org/headers
-```
+Los mensajes deben contener el campo `NombreCompleto` que se usará para buscar en la tabla:
 
-### Selectores CSS (`examples/selectors_example.json`)
 ```json
 {
-    "titulo": "h1",
-    "subtitulo": "h2",
-    "parrafo": "p",
-    "enlaces": "a",
-    "lista": "ul li",
-    "tabla": "table",
-    "imagenes": "img",
-    "div_contenido": "div.content",
-    "span_fecha": "span.date",
-    "clase_especial": ".special-class"
+    "NombreCompleto": "PAN AMERICAN LIFE DE ECUADOR",
+    "IdFactura": "FACT001",
+    "IdAseguradora": 14,
+    "NumDocIdentidad": "1234567890",
+    "PersonaPrimerNombre": "JUAN",
+    "PersonaPrimerApellido": "PEREZ",
+    "FechaProcesamiento": "2025-01-09T15:00:00Z"
 }
 ```
+
+## 📁 Características del Worker
+
+### 🚀 Modo SIEMPRE ACTIVO
+- El worker está configurado para estar **siempre esperando** mensajes
+- No se cierra cuando la cola está vacía
+- Procesa mensajes de forma continua y asíncrona
+
+### 💾 Sistema de Caché
+- Almacena URLs de aseguradoras en memoria
+- Evita consultas repetidas a la base de datos
+- Mejora significativamente el rendimiento
+
+### 🔄 Procesamiento Robusto
+- Manejo de errores sin interrumpir el worker
+- Acknowledgment manual de mensajes
+- Reconexión automática en caso de fallos
+
+### 📊 Logging Detallado
+- Logs en consola y archivo (`production_worker.log`)
+- Estadísticas del caché al iniciar y detener
+- Información detallada de cada mensaje procesado
 
 ## 🔧 Configuración Avanzada
 
-### Selectores CSS
+### Variables de Entorno
 
-Puedes especificar selectores CSS para extraer datos específicos:
+El worker lee la configuración desde el archivo `.env`:
 
-```json
-{
-    "titulo": "h1.article-title",
-    "autor": "span.author-name",
-    "fecha": "time.published-date",
-    "contenido": "div.article-content",
-    "etiquetas": "div.tags a"
-}
+```bash
+# SQL Server
+SQL_SERVER_HOST=localhost\MSSQLSERVER01
+SQL_SERVER_DATABASE=NeptunoMedicalAutomatico
+SQL_SERVER_TRUSTED_CONNECTION=yes
+
+# RabbitMQ
+RABBITMQ_HOST=localhost
+RABBITMQ_PORT=5672
+RABBITMQ_USERNAME=admin
+RABBITMQ_PASSWORD=admin123
+RABBITMQ_QUEUE=aseguradora_queue
+RABBITMQ_EXCHANGE=aseguradora_exchange
+RABBITMQ_ROUTING_KEY=aseguradora
+
+# Aplicación
+LOG_LEVEL=INFO
+SCRAPING_DELAY=1
+MAX_RETRIES=3
 ```
 
 ### Selenium vs Requests
