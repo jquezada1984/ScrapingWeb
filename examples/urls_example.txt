@@ -1,0 +1,5 @@
+https://httpbin.org/html
+https://httpbin.org/json
+https://httpbin.org/xml
+https://example.com
+https://httpbin.org/headers
