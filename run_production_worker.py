@@ -172,6 +172,9 @@ class AseguradoraProcessor:
                             logger.info(f"    ✅ Cliente {i+1} procesado")
                         else:
                             logger.warning(f"    ⚠️  Cliente {i+1} sin procesar")
+                    
+                    # Mostrar mensaje de espera después de procesar lista completa
+                    logger.info("⏳ Lista de clientes procesada - Esperando siguiente mensaje...")
                 else:
                     logger.warning("⚠️  Formato de mensaje no reconocido")
                 
@@ -180,6 +183,9 @@ class AseguradoraProcessor:
             
             # Acknowledge el mensaje
             ch.basic_ack(delivery_tag=method.delivery_tag)
+            
+            # Mostrar mensaje de espera después de procesar
+            logger.info("⏳ Mensaje procesado - Esperando siguiente mensaje...")
             
         except Exception as e:
             logger.error(f"❌ Error procesando mensaje: {e}")
@@ -224,6 +230,10 @@ class AseguradoraProcessor:
             try:
                 # BUCLE INFINITO - SIEMPRE ESPERANDO MENSAJES
                 logger.info("🔄 Worker iniciado - Esperando mensajes...")
+                
+                # Mostrar mensaje de espera cuando no hay mensajes
+                if message_count == 0:
+                    logger.info("⏳ No hay mensajes en cola - Esperando nuevos mensajes...")
                 
                 # Usar start_consuming() que mantiene el worker activo
                 self.rabbitmq_channel.start_consuming()
