@@ -47,6 +47,7 @@ class ProductionWorker:
             logger.info("   • Base de Datos: SQL Server")
             logger.info("   • Caché: URLs de aseguradoras")
             logger.info("   • Logs: Archivo + Consola")
+            logger.info("   • Modo: SIEMPRE ACTIVO - Esperando mensajes")
             logger.info("=" * 60)
             
             self.start_time = datetime.now()
@@ -58,7 +59,12 @@ class ProductionWorker:
             # Mostrar estadísticas iniciales
             self.show_status()
             
-            # Iniciar consumo de mensajes
+            logger.info("🔄 Iniciando procesador de mensajes...")
+            logger.info("⏳ Worker en modo PRODUCCIÓN - Siempre activo")
+            logger.info("💡 Presiona Ctrl+C para detener")
+            logger.info("=" * 60)
+            
+            # Iniciar consumo de mensajes (SIEMPRE ACTIVO)
             self.processor.start_consuming()
             
         except Exception as e:

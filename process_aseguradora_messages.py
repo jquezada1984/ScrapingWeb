@@ -7,6 +7,7 @@ y buscar las URLs correspondientes en la base de datos
 import json
 import pika
 import logging
+import time
 from datetime import datetime
 from src.config import Config
 from src.database import DatabaseManager
@@ -177,7 +178,7 @@ class AseguradoraProcessor:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
     
     def start_consuming(self):
-        """Inicia el consumo de mensajes"""
+        """Inicia el consumo de mensajes - SIEMPRE ACTIVO"""
         try:
             if not self.connect_rabbitmq():
                 return
@@ -197,24 +198,28 @@ class AseguradoraProcessor:
             logger.info(f"📈 Mensajes en cola: {message_count}")
             logger.info(f"👥 Consumidores activos: {consumer_count}")
             
-            if message_count == 0:
-                logger.info("ℹ️  No hay mensajes en la cola")
-                return
-            
             # Configurar QoS para procesar un mensaje a la vez
             self.rabbitmq_channel.basic_qos(prefetch_count=1)
             
-            # Consumir mensajes
+            # Consumir mensajes - SIEMPRE ACTIVO
             logger.info("🔄 Iniciando consumo de mensajes...")
             logger.info("💡 Presiona Ctrl+C para detener")
+            logger.info("⏳ Worker activo esperando mensajes...")
             
+            # Configurar el consumidor para estar siempre activo
             self.rabbitmq_channel.basic_consume(
                 queue=Config.RABBITMQ_QUEUE,
-                on_message_callback=self.process_message
+                on_message_callback=self.process_message,
+                auto_ack=False  # Acknowledgment manual para mejor control
             )
             
             try:
+                # BUCLE INFINITO - SIEMPRE ESPERANDO MENSAJES
+                logger.info("🔄 Worker iniciado - Esperando mensajes...")
+                
+                # Usar start_consuming() que mantiene el worker activo
                 self.rabbitmq_channel.start_consuming()
+                        
             except KeyboardInterrupt:
                 logger.info("⏹️  Deteniendo consumo de mensajes...")
                 self.rabbitmq_channel.stop_consuming()
