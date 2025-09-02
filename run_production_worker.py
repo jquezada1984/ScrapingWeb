@@ -12,6 +12,12 @@ import pika
 from datetime import datetime
 from src.config import Config
 from src.database import DatabaseManager
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # Configurar logging más detallado para producción
 logging.basicConfig(
@@ -31,7 +37,9 @@ class AseguradoraProcessor:
         self.rabbitmq_channel = None
         # Cache para URLs de aseguradoras (nombre -> url_info)
         self.url_cache = {}
-        logger.info("🚀 Procesador inicializado con caché de URLs")
+        # Driver de Selenium para login automático
+        self.driver = None
+        logger.info("🚀 Procesador inicializado con caché de URLs y Selenium")
     
     def connect_rabbitmq(self):
         """Conecta a RabbitMQ"""
@@ -69,39 +77,206 @@ class AseguradoraProcessor:
             logger.error(f"❌ Error conectando a RabbitMQ: {e}")
             return False
     
+    def setup_selenium_driver(self):
+        """Configura el driver de Selenium para login automático"""
+        try:
+            if self.driver:
+                return True
+                
+            logger.info("🔧 Configurando driver de Selenium...")
+            
+            # Opciones de Chrome para modo headless
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")  # Ejecutar sin interfaz gráfica
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            
+            # Crear driver
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.set_page_load_timeout(30)
+            
+            logger.info("✅ Driver de Selenium configurado correctamente")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error configurando Selenium: {e}")
+            return False
+    
+    def execute_login(self, url_info):
+        """Ejecuta el login automático en la página web"""
+        try:
+            if not self.setup_selenium_driver():
+                logger.error("❌ No se pudo configurar Selenium")
+                return False
+            
+            url_login = url_info['url_login']
+            logger.info(f"🌐 Navegando a: {url_login}")
+            
+            # Navegar a la página de login
+            self.driver.get(url_login)
+            
+            # Esperar a que la página cargue
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            logger.info("✅ Página cargada correctamente")
+            
+            # Ejecutar campos de login
+            if url_info.get('campos_login'):
+                logger.info("🔐 Ejecutando campos de login...")
+                
+                for campo in url_info['campos_login']:
+                    selector = campo['selector_html']
+                    valor = campo['valor_dinamico']
+                    
+                    if not valor:
+                        logger.warning(f"⚠️  Campo {selector} sin valor, saltando...")
+                        continue
+                    
+                    try:
+                        # Buscar el elemento
+                        elemento = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        
+                        # Limpiar y escribir valor
+                        elemento.clear()
+                        elemento.send_keys(valor)
+                        
+                        logger.info(f"✅ Campo {selector} completado con: {valor}")
+                        
+                    except TimeoutException:
+                        logger.error(f"❌ No se encontró el campo {selector}")
+                        return False
+                    except Exception as e:
+                        logger.error(f"❌ Error en campo {selector}: {e}")
+                        return False
+            
+            # Ejecutar acciones post-login
+            if url_info.get('acciones_post_login'):
+                logger.info("🎯 Ejecutando acciones post-login...")
+                
+                for accion in url_info['acciones_post_login']:
+                    tipo = accion['tipo_accion']
+                    selector = accion['selector_html']
+                    
+                    try:
+                        # Buscar el elemento
+                        elemento = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                        )
+                        
+                        if tipo.lower() == 'click':
+                            elemento.click()
+                            logger.info(f"✅ Click ejecutado en: {selector}")
+                        elif tipo.lower() == 'submit':
+                            elemento.submit()
+                            logger.info(f"✅ Submit ejecutado en: {selector}")
+                        else:
+                            logger.warning(f"⚠️  Tipo de acción no reconocido: {tipo}")
+                        
+                        # Pequeña pausa para que la acción se procese
+                        time.sleep(2)
+                        
+                    except TimeoutException:
+                        logger.error(f"❌ No se pudo ejecutar acción {tipo} en {selector}")
+                        return False
+                    except Exception as e:
+                        logger.error(f"❌ Error ejecutando acción {tipo}: {e}")
+                        return False
+            
+            # Verificar si el login fue exitoso
+            logger.info("🔍 Verificando resultado del login...")
+            
+            # Esperar un momento para que la página procese el login
+            time.sleep(3)
+            
+            # Obtener la URL actual para verificar si cambió
+            url_actual = self.driver.current_url
+            titulo_pagina = self.driver.title
+            
+            logger.info(f"✅ Login completado exitosamente!")
+            logger.info(f"   📍 URL actual: {url_actual}")
+            logger.info(f"   📄 Título de la página: {titulo_pagina}")
+            
+            # Si hay URL de destino, verificar si llegamos ahí
+            if url_info.get('url_destino'):
+                if url_info['url_destino'] in url_actual:
+                    logger.info("🎯 ¡Llegamos a la URL de destino!")
+                else:
+                    logger.info("ℹ️  No llegamos a la URL de destino, pero el login fue exitoso")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error ejecutando login: {e}")
+            return False
+    
     def get_url_by_aseguradora_name(self, nombre_aseguradora):
-        """Busca la URL de una aseguradora por su nombre en la base de datos o caché"""
+        """Busca la URL y campos de login de una aseguradora por su nombre en la base de datos o caché"""
         try:
             # Primero verificar si ya está en caché
             if nombre_aseguradora in self.url_cache:
-                logger.info(f"📋 URL encontrada en caché para: {nombre_aseguradora}")
+                logger.info(f"📋 Información encontrada en caché para: {nombre_aseguradora}")
                 return self.url_cache[nombre_aseguradora]
             
             # Si no está en caché, buscar en la base de datos
-            logger.info(f"🔍 Buscando URL en base de datos para: {nombre_aseguradora}")
-            query = """
+            logger.info(f"🔍 Buscando información en base de datos para: {nombre_aseguradora}")
+            
+            # 1. Obtener información básica de la URL
+            url_query = """
                 SELECT id, nombre, url_login, url_destino, descripcion, fecha_creacion
                 FROM urls_automatizacion 
                 WHERE nombre = :nombre
             """
             
-            # Usar el método correcto de DatabaseManager con parámetros nombrados
-            results = self.db_manager.execute_query(query, {'nombre': nombre_aseguradora})
+            url_results = self.db_manager.execute_query(url_query, {'nombre': nombre_aseguradora})
             
-            if results and len(results) > 0:
-                row = results[0]
+            if url_results and len(url_results) > 0:
+                url_row = url_results[0]
+                url_id = str(url_row['id'])
+                
+                # 2. Obtener campos de login (usuario/contraseña)
+                campos_query = """
+                    SELECT selector_html, valor_dinamico
+                    FROM campos_login 
+                    WHERE id_url = :id_url
+                    ORDER BY selector_html
+                """
+                
+                campos_results = self.db_manager.execute_query(campos_query, {'id_url': url_id})
+                
+                # 3. Obtener acciones post-login
+                acciones_query = """
+                    SELECT tipo_accion, selector_html, valor_dinamico
+                    FROM acciones_post_login 
+                    WHERE id_url = :id_url
+                    ORDER BY tipo_accion
+                """
+                
+                acciones_results = self.db_manager.execute_query(acciones_query, {'id_url': url_id})
+                
+                # Construir información completa
                 url_info = {
-                    'id': str(row['id']),
-                    'nombre': row['nombre'],
-                    'url_login': row['url_login'],
-                    'url_destino': row['url_destino'],
-                    'descripcion': row['descripcion'],
-                    'fecha_creacion': row['fecha_creacion'].isoformat() if row['fecha_creacion'] else None
+                    'id': url_id,
+                    'nombre': url_row['nombre'],
+                    'url_login': url_row['url_login'],
+                    'url_destino': url_row['url_destino'],
+                    'descripcion': url_row['descripcion'],
+                    'fecha_creacion': url_row['fecha_creacion'].isoformat() if url_row['fecha_creacion'] else None,
+                    'campos_login': campos_results,
+                    'acciones_post_login': acciones_results
                 }
                 
                 # Guardar en caché para futuras consultas
                 self.url_cache[nombre_aseguradora] = url_info
-                logger.info(f"💾 URL guardada en caché para: {nombre_aseguradora}")
+                logger.info(f"💾 Información completa guardada en caché para: {nombre_aseguradora}")
+                logger.info(f"   📝 Campos de login: {len(campos_results)}")
+                logger.info(f"   🎯 Acciones post-login: {len(acciones_results)}")
                 
                 return url_info
             else:
@@ -109,7 +284,7 @@ class AseguradoraProcessor:
                 return None
                     
         except Exception as e:
-            logger.error(f"❌ Error buscando URL para {nombre_aseguradora}: {e}")
+            logger.error(f"❌ Error buscando información para {nombre_aseguradora}: {e}")
             return None
     
     def process_aseguradora_message(self, message_data):
@@ -133,7 +308,35 @@ class AseguradoraProcessor:
                     'procesado_en': datetime.now().isoformat()
                 }
                 
-                logger.info(f"✅ URL encontrada para {nombre_aseguradora}: {url_info['url_login']}")
+                logger.info(f"✅ Información completa encontrada para {nombre_aseguradora}")
+                logger.info(f"   🌐 URL Login: {url_info['url_login']}")
+                if url_info.get('url_destino'):
+                    logger.info(f"   🎯 URL Destino: {url_info['url_destino']}")
+                
+                # Mostrar campos de login
+                if url_info.get('campos_login'):
+                    logger.info(f"   🔐 Campos de Login:")
+                    for campo in url_info['campos_login']:
+                        selector = campo['selector_html']
+                        valor = campo['valor_dinamico'] or 'Sin valor'
+                        logger.info(f"      • {selector}: {valor}")
+                
+                # Mostrar acciones post-login
+                if url_info.get('acciones_post_login'):
+                    logger.info(f"   🎯 Acciones Post-Login:")
+                    for accion in url_info['acciones_post_login']:
+                        tipo = accion['tipo_accion']
+                        selector = accion['selector_html']
+                        valor = accion['valor_dinamico'] or 'Sin valor'
+                        logger.info(f"      • {tipo}: {selector} = {valor}")
+                
+                # 🚀 EJECUTAR LOGIN AUTOMÁTICO
+                logger.info("🚀 Iniciando login automático...")
+                if self.execute_login(url_info):
+                    logger.info("🎉 ¡LOGIN AUTOMÁTICO EXITOSO!")
+                else:
+                    logger.error("❌ Falló el login automático")
+                
                 return result
             else:
                 logger.warning(f"⚠️  No se encontró URL para {nombre_aseguradora}")
@@ -269,6 +472,14 @@ class AseguradoraProcessor:
         try:
             # Mostrar estadísticas del caché antes de limpiar
             self.show_cache_stats()
+            
+            # Cerrar driver de Selenium
+            if self.driver:
+                try:
+                    self.driver.quit()
+                    logger.info("🔌 Driver de Selenium cerrado")
+                except Exception as e:
+                    logger.error(f"❌ Error cerrando Selenium: {e}")
             
             if self.rabbitmq_channel and not self.rabbitmq_channel.is_closed:
                 self.rabbitmq_channel.close()
