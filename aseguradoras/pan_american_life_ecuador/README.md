@@ -28,13 +28,29 @@
 ## ⚙️ Configuración
 
 ### Variables de Entorno
-Todas las configuraciones se pueden personalizar a través de variables de entorno. El sistema busca estas variables en el archivo `.env` principal del proyecto.
+Todas las configuraciones se obtienen del archivo `.env` principal del proyecto. **No hay valores por defecto** - todas las variables deben estar configuradas.
+
+### Variables Requeridas
+Estas variables **DEBEN** estar definidas en el archivo `.env`:
+- `PALE_EC_LOGIN_URL`: URL de login de la aseguradora
+- `PALE_EC_USERNAME`: Usuario para el login
+- `PALE_EC_PASSWORD`: Contraseña para el login
+- `PALE_EC_USERNAME_SELECTOR`: Selector CSS del campo usuario
+- `PALE_EC_PASSWORD_SELECTOR`: Selector CSS del campo contraseña
+- `PALE_EC_TIMEOUT_CARGA_PAGINA`: Timeout para carga de página (en segundos)
+- `PALE_EC_SELENIUM_TIMEOUT_PAGINA`: Timeout de Selenium para página (en segundos)
+
+### Variables Opcionales
+Estas variables tienen valores por defecto pero se pueden personalizar:
+- `PALE_EC_LOGIN_BUTTON_WAIT`: Tiempo de espera después del click (por defecto: 2 segundos)
+- `PALE_EC_ERRORES_REINTENTOS`: Número de reintentos (por defecto: 3)
+- `PALE_EC_CACHE_HABILITADO`: Habilitar caché (por defecto: true)
 
 ### URLs
-- **Login**: `PALE_EC_LOGIN_URL` (por defecto: `https://attest.palig.com/as/authorization.oauth2?...`)
-- **Destino**: `PALE_EC_DESTINO_URL` (por defecto: `https://paligdirect.com/PortalWeb/callback`)
-- **Base**: `PALE_EC_BASE_URL` (por defecto: `https://attest.palig.com`)
-- **Portal**: `PALE_EC_PORTAL_URL` (por defecto: `https://paligdirect.com`)
+- **Login**: `PALE_EC_LOGIN_URL` (requerida)
+- **Destino**: `PALE_EC_DESTINO_URL` (requerida)
+- **Base**: `PALE_EC_BASE_URL` (opcional)
+- **Portal**: `PALE_EC_PORTAL_URL` (opcional)
 
 ### Campos de Login
 | Selector | Valor | Tipo | Descripción | Orden | Variable ENV |
@@ -56,11 +72,11 @@ Todas las configuraciones se pueden personalizar a través de variables de entor
 - `PALE_EC_LOGIN_BUTTON_WAIT`: Tiempo de espera después del click (en segundos)
 
 ### Timeouts
-- **Carga de página**: `PALE_EC_TIMEOUT_CARGA_PAGINA` (por defecto: 30 segundos)
-- **Elementos visibles**: `PALE_EC_TIMEOUT_ELEMENTO_VISIBLE` (por defecto: 10 segundos)
-- **Elementos clicables**: `PALE_EC_TIMEOUT_ELEMENTO_CLICABLE` (por defecto: 10 segundos)
-- **Procesamiento login**: `PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN` (por defecto: 3 segundos)
-- **Navegación**: `PALE_EC_TIMEOUT_NAVEGACION` (por defecto: 5 segundos)
+- **Carga de página**: `PALE_EC_TIMEOUT_CARGA_PAGINA` (requerida)
+- **Elementos visibles**: `PALE_EC_TIMEOUT_ELEMENTO_VISIBLE` (requerida)
+- **Elementos clicables**: `PALE_EC_TIMEOUT_ELEMENTO_CLICABLE` (requerida)
+- **Procesamiento login**: `PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN` (requerida)
+- **Navegación**: `PALE_EC_TIMEOUT_NAVEGACION` (requerida)
 
 ## 🔧 Uso
 
@@ -243,6 +259,8 @@ PALE_EC_SELENIUM_HEADLESS=false
 ```
 
 **Archivo de ejemplo completo**: `aseguradoras/pan_american_life_ecuador/env.example`
+
+⚠️ **IMPORTANTE**: Copia el archivo `env.example` a `.env` en la raíz del proyecto y configura todas las variables requeridas antes de usar el sistema.
 
 ### Requisitos
 - Python 3.8+

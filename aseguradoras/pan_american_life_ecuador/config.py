@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
 Configuración específica para PAN AMERICAN LIFE DE ECUADOR
+
+IMPORTANTE: Todas las configuraciones se obtienen del archivo .env principal del proyecto.
+No hay valores hardcodeados en este archivo. Si una variable no está definida en .env,
+el sistema fallará con un error claro indicando qué variable falta.
+
+Variables requeridas:
+- PALE_EC_LOGIN_URL: URL de login de la aseguradora
+- PALE_EC_USERNAME: Usuario para el login
+- PALE_EC_PASSWORD: Contraseña para el login
+- PALE_EC_USERNAME_SELECTOR: Selector CSS del campo usuario
+- PALE_EC_PASSWORD_SELECTOR: Selector CSS del campo contraseña
+- PALE_EC_TIMEOUT_CARGA_PAGINA: Timeout para carga de página
+- PALE_EC_SELENIUM_TIMEOUT_PAGINA: Timeout de Selenium para página
+
+Ver archivo env.example para todas las variables disponibles.
 """
 
 import os
@@ -16,25 +31,25 @@ ASEGURADORA_INFO = {
 
 # URLs de la aseguradora
 URLS = {
-    'login': os.getenv('PALE_EC_LOGIN_URL', 'https://attest.palig.com/as/authorization.oauth2?client_id=cf7770f3699048ca9c61358b4dff25f5&redirect_uri=https%3A%2F%2Fbenefitsdirect.palig.com%2FInicio%2FLogin.aspx&response_type=code%20id_token&scope=openid%20profile%20email%20phone&state=OpenIdConnect.AuthenticationProperties%3DTBYyPWZT_d1ZE_uAG3CKh3HsoxTt77sdU39y8JDs7IOuNQ90L-8LKm0LywIZTuOPxnSIZ3tQ280RiX9A7UhlbevOoIWavNKgzA4ZMdbeXsll9vvQYwGEZ-wsT_V6XBo_n6rvja_bvMdoSTLq9qZNpRunGJp5OAURWnVJ64vS_7M3A6nDhPnwa-f97XD50MvEduGmNxJU4c4GTKZX7baDKXCit8orDw2iJfjFaaiXmgssMdAaTYs8Dj3c7Jvm7KshZhcC9nXdk9KnB2i0t&response_mode=form_post&nonce=638919538746530905.MzI3NGIzOTItZTA3OS00YmUwLThkZTQtNDg2N2NiOGU1NzMyMDNjMmZlNTMtN2E3Yy00ZjM2LTg0YWEtM2YwMDUyMjY4MTM0&x-client-SKU=ID_NET451&x-client-ver=5.6.0.0'),
-    'destino': os.getenv('PALE_EC_DESTINO_URL', 'https://paligdirect.com/PortalWeb/callback'),
-    'base': os.getenv('PALE_EC_BASE_URL', 'https://attest.palig.com'),
-    'portal': os.getenv('PALE_EC_PORTAL_URL', 'https://paligdirect.com')
+    'login': os.getenv('PALE_EC_LOGIN_URL'),
+    'destino': os.getenv('PALE_EC_DESTINO_URL'),
+    'base': os.getenv('PALE_EC_BASE_URL'),
+    'portal': os.getenv('PALE_EC_PORTAL_URL')
 }
 
 # Campos de login (selectores HTML y valores)
 CAMPOS_LOGIN = [
     {
-        'selector': os.getenv('PALE_EC_USERNAME_SELECTOR', '#username'),
-        'valor': os.getenv('PALE_EC_USERNAME', 'conveniosyseguros@mediglobal.com.ec'),
+        'selector': os.getenv('PALE_EC_USERNAME_SELECTOR'),
+        'valor': os.getenv('PALE_EC_USERNAME'),
         'tipo': 'input',
         'descripcion': 'Campo de usuario/email',
         'requerido': True,
         'orden': 1
     },
     {
-        'selector': os.getenv('PALE_EC_PASSWORD_SELECTOR', '#password'),
-        'valor': os.getenv('PALE_EC_PASSWORD', 'Mediglobal1'),
+        'selector': os.getenv('PALE_EC_PASSWORD_SELECTOR'),
+        'valor': os.getenv('PALE_EC_PASSWORD'),
         'tipo': 'input',
         'descripcion': 'Campo de contraseña',
         'requerido': True,
@@ -46,7 +61,7 @@ CAMPOS_LOGIN = [
 ACCIONES_POST_LOGIN = [
     {
         'tipo': 'click',
-        'selector': os.getenv('PALE_EC_LOGIN_BUTTON_SELECTOR', 'a[title="Inicio de sesión"]'),
+        'selector': os.getenv('PALE_EC_LOGIN_BUTTON_SELECTOR'),
         'descripcion': 'Botón de inicio de sesión',
         'espera_despues': int(os.getenv('PALE_EC_LOGIN_BUTTON_WAIT', '2')),
         'orden': 1
@@ -55,53 +70,53 @@ ACCIONES_POST_LOGIN = [
 
 # Configuración de Selenium específica para esta aseguradora
 SELENIUM_CONFIG = {
-    'timeout_pagina': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_PAGINA', '30')),
-    'timeout_elementos': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_ELEMENTOS', '10')),
-    'espera_post_login': int(os.getenv('PALE_EC_SELENIUM_ESPERA_POST_LOGIN', '3')),
-    'user_agent': os.getenv('PALE_EC_SELENIUM_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
-    'window_size': os.getenv('PALE_EC_SELENIUM_WINDOW_SIZE', '1920,1080'),
+    'timeout_pagina': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_PAGINA')),
+    'timeout_elementos': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_ELEMENTOS')),
+    'espera_post_login': int(os.getenv('PALE_EC_SELENIUM_ESPERA_POST_LOGIN')),
+    'user_agent': os.getenv('PALE_EC_SELENIUM_USER_AGENT'),
+    'window_size': os.getenv('PALE_EC_SELENIUM_WINDOW_SIZE'),
     'headless': os.getenv('PALE_EC_SELENIUM_HEADLESS', 'true').lower() == 'true',
-    'opciones_especiales': os.getenv('PALE_EC_SELENIUM_OPCIONES_ESPECIALES', '--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--disable-web-security,--allow-running-insecure-content').split(',')
+    'opciones_especiales': os.getenv('PALE_EC_SELENIUM_OPCIONES_ESPECIALES', '').split(',') if os.getenv('PALE_EC_SELENIUM_OPCIONES_ESPECIALES') else []
 }
 
 # Configuración de esperas y timeouts
 TIMEOUTS = {
-    'carga_pagina': int(os.getenv('PALE_EC_TIMEOUT_CARGA_PAGINA', '30')),
-    'elemento_visible': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_VISIBLE', '10')),
-    'elemento_clicable': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_CLICABLE', '10')),
-    'procesamiento_login': int(os.getenv('PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN', '3')),
-    'navegacion': int(os.getenv('PALE_EC_TIMEOUT_NAVEGACION', '5'))
+    'carga_pagina': int(os.getenv('PALE_EC_TIMEOUT_CARGA_PAGINA')),
+    'elemento_visible': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_VISIBLE')),
+    'elemento_clicable': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_CLICABLE')),
+    'procesamiento_login': int(os.getenv('PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN')),
+    'navegacion': int(os.getenv('PALE_EC_TIMEOUT_NAVEGACION'))
 }
 
 # Validaciones post-login
 VALIDACIONES = {
-    'url_exito': os.getenv('PALE_EC_URL_EXITO', 'paligdirect.com'),
-    'titulo_exito': os.getenv('PALE_EC_TITULO_EXITO', 'Pan-American Life Insurance Group'),
-    'elementos_esperados': os.getenv('PALE_EC_ELEMENTOS_ESPERADOS', 'body,main,nav').split(','),
-    'elementos_no_esperados': os.getenv('PALE_EC_ELEMENTOS_NO_ESPERADOS', 'error,invalid,failed').split(',')
+    'url_exito': os.getenv('PALE_EC_URL_EXITO'),
+    'titulo_exito': os.getenv('PALE_EC_TITULO_EXITO'),
+    'elementos_esperados': os.getenv('PALE_EC_ELEMENTOS_ESPERADOS', '').split(',') if os.getenv('PALE_EC_ELEMENTOS_ESPERADOS') else [],
+    'elementos_no_esperados': os.getenv('PALE_EC_ELEMENTOS_NO_ESPERADOS', '').split(',') if os.getenv('PALE_EC_ELEMENTOS_NO_ESPERADOS') else []
 }
 
 # Manejo de errores específicos
 MANEJO_ERRORES = {
-    'errores_conocidos': os.getenv('PALE_EC_ERRORES_CONOCIDOS', 'Usuario o contraseña incorrectos,Sesión expirada,Mantenimiento del sistema,Servicio no disponible').split(','),
+    'errores_conocidos': os.getenv('PALE_EC_ERRORES_CONOCIDOS', '').split(',') if os.getenv('PALE_EC_ERRORES_CONOCIDOS') else [],
     'reintentos': int(os.getenv('PALE_EC_ERRORES_REINTENTOS', '3')),
     'espera_entre_reintentos': int(os.getenv('PALE_EC_ERRORES_ESPERA_ENTRE_REINTENTOS', '5')),
-    'acciones_error': os.getenv('PALE_EC_ERRORES_ACCIONES', 'limpiar_campos,recargar_pagina,verificar_conectividad').split(',')
+    'acciones_error': os.getenv('PALE_EC_ERRORES_ACCIONES', '').split(',') if os.getenv('PALE_EC_ERRORES_ACCIONES') else []
 }
 
 # Configuración de logging específica
 LOGGING = {
-    'nivel': os.getenv('PALE_EC_LOG_LEVEL', 'INFO'),
-    'archivo': os.getenv('PALE_EC_LOG_ARCHIVO', 'pan_american_life_ecuador.log'),
-    'formato': os.getenv('PALE_EC_LOG_FORMATO', '%(asctime)s - %(levelname)s - [PALE_EC] - %(message)s'),
-    'rotacion': os.getenv('PALE_EC_LOG_ROTACION', 'daily'),
-    'max_size': os.getenv('PALE_EC_LOG_MAX_SIZE', '10MB')
+    'nivel': os.getenv('PALE_EC_LOG_LEVEL'),
+    'archivo': os.getenv('PALE_EC_LOG_ARCHIVO'),
+    'formato': os.getenv('PALE_EC_LOG_FORMATO'),
+    'rotacion': os.getenv('PALE_EC_LOG_ROTACION'),
+    'max_size': os.getenv('PALE_EC_LOG_MAX_SIZE')
 }
 
 # Configuración de caché
 CACHE = {
     'habilitado': os.getenv('PALE_EC_CACHE_HABILITADO', 'true').lower() == 'true',
-    'tiempo_vida': int(os.getenv('PALE_EC_CACHE_TIEMPO_VIDA', '3600')),  # 1 hora en segundos
+    'tiempo_vida': int(os.getenv('PALE_EC_CACHE_TIEMPO_VIDA', '3600')),
     'max_elementos': int(os.getenv('PALE_EC_CACHE_MAX_ELEMENTOS', '100')),
     'limpiar_automatico': os.getenv('PALE_EC_CACHE_LIMPIAR_AUTOMATICO', 'true').lower() == 'true'
 }
@@ -109,11 +124,11 @@ CACHE = {
 # Configuración de monitoreo
 MONITOREO = {
     'habilitado': os.getenv('PALE_EC_MONITOREO_HABILITADO', 'true').lower() == 'true',
-    'intervalo_verificacion': int(os.getenv('PALE_EC_MONITOREO_INTERVALO', '300')),  # 5 minutos
-    'metricas': os.getenv('PALE_EC_MONITOREO_METRICAS', 'tiempo_login,tasa_exito,errores_frecuentes,performance').split(','),
+    'intervalo_verificacion': int(os.getenv('PALE_EC_MONITOREO_INTERVALO', '300')),
+    'metricas': os.getenv('PALE_EC_MONITOREO_METRICAS', '').split(',') if os.getenv('PALE_EC_MONITOREO_METRICAS') else [],
     'alertas': {
-        'tiempo_login_max': int(os.getenv('PALE_EC_MONITOREO_TIEMPO_MAX', '30')),  # segundos
-        'tasa_exito_min': float(os.getenv('PALE_EC_MONITOREO_TASA_EXITO_MIN', '0.95')),  # 95%
+        'tiempo_login_max': int(os.getenv('PALE_EC_MONITOREO_TIEMPO_MAX', '30')),
+        'tasa_exito_min': float(os.getenv('PALE_EC_MONITOREO_TASA_EXITO_MIN', '0.95')),
         'errores_consecutivos_max': int(os.getenv('PALE_EC_MONITOREO_ERRORES_MAX', '5'))
     }
 }
@@ -130,25 +145,25 @@ SEGURIDAD = {
 # Configuración de notificaciones
 NOTIFICACIONES = {
     'habilitadas': os.getenv('PALE_EC_NOTIFICACIONES_HABILITADAS', 'true').lower() == 'true',
-    'canales': os.getenv('PALE_EC_NOTIFICACIONES_CANALES', 'email,webhook').split(','),
-    'eventos': os.getenv('PALE_EC_NOTIFICACIONES_EVENTOS', 'login_exitoso,login_fallido,error_sistema,mantenimiento').split(','),
-    'destinatarios': os.getenv('PALE_EC_NOTIFICACIONES_DESTINATARIOS', 'admin@mediglobal.com.ec,soporte@mediglobal.com.ec').split(',')
+    'canales': os.getenv('PALE_EC_NOTIFICACIONES_CANALES', '').split(',') if os.getenv('PALE_EC_NOTIFICACIONES_CANALES') else [],
+    'eventos': os.getenv('PALE_EC_NOTIFICACIONES_EVENTOS', '').split(',') if os.getenv('PALE_EC_NOTIFICACIONES_EVENTOS') else [],
+    'destinatarios': os.getenv('PALE_EC_NOTIFICACIONES_DESTINATARIOS', '').split(',') if os.getenv('PALE_EC_NOTIFICACIONES_DESTINATARIOS') else []
 }
 
 # Configuración de backup y recuperación
 BACKUP = {
     'habilitado': os.getenv('PALE_EC_BACKUP_HABILITADO', 'true').lower() == 'true',
-    'frecuencia': os.getenv('PALE_EC_BACKUP_FRECUENCIA', 'daily'),
+    'frecuencia': os.getenv('PALE_EC_BACKUP_FRECUENCIA'),
     'retener_dias': int(os.getenv('PALE_EC_BACKUP_RETENER_DIAS', '30')),
     'comprimir': os.getenv('PALE_EC_BACKUP_COMPRIMIR', 'true').lower() == 'true',
-    'ubicacion': os.getenv('PALE_EC_BACKUP_UBICACION', './backups/pan_american_life_ecuador/')
+    'ubicacion': os.getenv('PALE_EC_BACKUP_UBICACION')
 }
 
 # Configuración de reportes
 REPORTES = {
     'habilitados': os.getenv('PALE_EC_REPORTES_HABILITADOS', 'true').lower() == 'true',
-    'frecuencia': os.getenv('PALE_EC_REPORTES_FRECUENCIA', 'daily'),
-    'formato': os.getenv('PALE_EC_REPORTES_FORMATO', 'PDF'),
+    'frecuencia': os.getenv('PALE_EC_REPORTES_FRECUENCIA'),
+    'formato': os.getenv('PALE_EC_REPORTES_FORMATO'),
     'incluir_logs': os.getenv('PALE_EC_REPORTES_INCLUIR_LOGS', 'true').lower() == 'true',
     'incluir_metricas': os.getenv('PALE_EC_REPORTES_INCLUIR_METRICAS', 'true').lower() == 'true',
     'enviar_automatico': os.getenv('PALE_EC_REPORTES_ENVIAR_AUTOMATICO', 'true').lower() == 'true'
@@ -184,18 +199,31 @@ def validar_configuracion():
     if not ASEGURADORA_INFO.get('nombre'):
         errores.append("Nombre de aseguradora no definido")
     
+    # Validar URLs requeridas
     if not URLS.get('login'):
-        errores.append("URL de login no definida")
+        errores.append("Variable PALE_EC_LOGIN_URL no definida en .env")
+    if not URLS.get('destino'):
+        errores.append("Variable PALE_EC_DESTINO_URL no definida en .env")
     
+    # Validar campos de login
     if not CAMPOS_LOGIN:
         errores.append("No hay campos de login definidos")
     
-    # Validar campos de login
     for campo in CAMPOS_LOGIN:
         if not campo.get('selector'):
-            errores.append(f"Selector no definido para campo: {campo.get('descripcion', 'Desconocido')}")
+            errores.append(f"Variable PALE_EC_USERNAME_SELECTOR o PALE_EC_PASSWORD_SELECTOR no definida en .env")
         if not campo.get('valor') and campo.get('requerido'):
-            errores.append(f"Valor requerido no definido para campo: {campo.get('selector')}")
+            errores.append(f"Variable PALE_EC_USERNAME o PALE_EC_PASSWORD no definida en .env")
+    
+    # Validar timeouts
+    if not TIMEOUTS.get('carga_pagina'):
+        errores.append("Variable PALE_EC_TIMEOUT_CARGA_PAGINA no definida en .env")
+    if not TIMEOUTS.get('elemento_visible'):
+        errores.append("Variable PALE_EC_TIMEOUT_ELEMENTO_VISIBLE no definida en .env")
+    
+    # Validar configuración de Selenium
+    if not SELENIUM_CONFIG.get('timeout_pagina'):
+        errores.append("Variable PALE_EC_SELENIUM_TIMEOUT_PAGINA no definida en .env")
     
     return errores
 

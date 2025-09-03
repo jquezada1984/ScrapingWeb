@@ -39,7 +39,7 @@ scraping_web/
 1. **Python 3.8+**
 2. **SQL Server** (servicio externo en otro proyecto)
 3. **RabbitMQ Server** (servicio externo en otro proyecto)
-4. **Chrome/Chromium** (para Selenium)
+4. **Microsoft Edge** (recomendado) o **Chrome/Chromium** (para Selenium)
 
 ### Servicios Externos Requeridos
 
@@ -494,3 +494,93 @@ docker-compose up -d
 # 3. Ver logs
 docker-compose logs -f scraping_app
 ```
+
+## 🔄 Cambios Implementados
+
+### 1. Migración de Chrome a Microsoft Edge
+- **Cambio de navegador**: Migrado de Google Chrome a Microsoft Edge para mejor estabilidad en Windows
+- **Selenium actualizado**: Actualizado de Selenium 3.141.0 a Selenium 4.35.0 para compatibilidad con Edge
+- **Mejor rendimiento**: Edge suele ser más estable y compatible con Selenium en entornos Windows
+- **Configuración optimizada**: Opciones específicas de Edge para reducir logs y mejorar rendimiento
+
+### 2. Aumento de Tiempos de Espera OAuth2
+- **Primera redirección**: Aumentada de 60 segundos (20 intentos × 3s) a **120 segundos (40 intentos × 3s)**
+- **Segunda redirección**: Aumentada de 30 segundos (10 intentos × 3s) a **60 segundos (20 intentos × 3s)**
+
+### 2. Detección y Manejo de Página `authorization.ping`
+- **Detección automática**: El sistema ahora detecta cuando se queda en la página intermedia `authorization.ping`
+- **Búsqueda activa de elementos**: Busca botones, enlaces y elementos clickeables para continuar el flujo OAuth2
+- **Múltiples selectores**: Busca en `button`, `input[type="submit"]`, `a`, `[role="button"]`, `.btn`, `.button`
+- **Logging detallado**: Registra todos los elementos encontrados y los intentos de clic
+
+### 3. Navegación Manual como Fallback
+- **Redirección automática**: Si el flujo OAuth2 no llega a `benefitsdirect.palig.com`, se intenta navegación manual
+- **URL objetivo**: `https://benefitsdirect.palig.com/Inicio/Contenido/InfoAsegurado/MisPolizasPVR.aspx`
+- **Verificación**: Se confirma que la navegación manual fue exitosa
+
+### 4. Mejoras en Navegación a Página de Búsqueda
+- **Verificación de estado**: Después del login, se verifica si ya estamos en la página correcta
+- **Navegación directa**: Si no estamos en la página correcta, se intenta navegación directa
+- **Reintentos**: Si falla, se reintenta la navegación
+- **Verificación de carga**: Se espera explícitamente a que `document.readyState == "complete"`
+
+### 5. Manejo de Redirección a Página Principal
+- **Detección**: Se detecta cuando el sistema aterriza en la página principal en lugar de la de búsqueda
+- **Múltiples estrategias de redirección**:
+  - **Estrategia 1**: Navegación directa a la URL objetivo
+  - **Estrategia 2**: Búsqueda y clic en enlaces relevantes en la página principal
+  - **Estrategia 3**: Navegación a URLs alternativas como último recurso
+- **Logging detallado**: Se registra cada estrategia y su resultado
+- **Fallback inteligente**: Si una estrategia falla, se intenta la siguiente
+
+### 6. Sistema de Logging Detallado de URLs 🆕
+- **Rastreo de cambios de URL**: Se detecta y registra cada cambio de URL durante el flujo OAuth2
+- **Logs antes y después**: Se registra la URL antes y después de cada navegación
+- **Detección de estados intermedios**: Se identifica claramente cuando se está en `authorization.ping`
+- **Seguimiento de estrategias**: Cada estrategia de navegación registra su URL objetivo y resultado
+- **Verificación de resultados**: Se confirma la URL final después de cada operación
+- **Logs estructurados**: Formato consistente con emojis y jerarquía visual para fácil lectura
+
+## 🧪 Scripts de Prueba
+
+### `test_oauth2_flow.py`
+Script independiente para probar solo el flujo OAuth2 mejorado:
+```bash
+python test_oauth2_flow.py
+```
+
+### `test_complete_flow.py`
+Script independiente para probar el flujo completo incluyendo navegación post-login:
+```bash
+python test_complete_flow.py
+```
+
+### `test_url_logging.py` 🆕
+Script independiente para verificar el sistema de logging de URLs:
+```bash
+python test_url_logging.py
+```
+
+## 📝 Notas de Implementación
+
+### Logging de URLs
+El sistema ahora registra detalladamente:
+- **URL inicial** antes de cada operación
+- **URL después** de cada operación
+- **Cambios detectados** durante el flujo OAuth2
+- **Resultado de cada estrategia** de navegación
+- **URLs finales** después de cada proceso
+
+### Formato de Logs
+Los logs utilizan un formato estructurado con:
+- Emojis para identificación visual rápida
+- Jerarquía clara con indentación
+- Información de URL antes y después
+- Estados y transiciones claramente marcados
+
+### Beneficios del Nuevo Sistema
+1. **Trazabilidad completa**: Se puede seguir exactamente el flujo de navegación
+2. **Debugging mejorado**: Identificación rápida de dónde se queda el proceso
+3. **Control de flujo**: Visibilidad total de las redirecciones OAuth2
+4. **Análisis de fallos**: Fácil identificación de qué estrategia falló
+5. **Monitoreo en tiempo real**: Seguimiento del progreso durante la ejecución
