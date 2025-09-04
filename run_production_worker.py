@@ -160,10 +160,8 @@ class AseguradoraProcessor:
                         continue
                     
                     try:
-                        # Buscar el elemento
-                        elemento = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                        )
+                        # Buscar el elemento con reintento de recarga
+                        elemento = self._buscar_elemento_con_reintento(selector, f"Campo {selector}")
                         
                         # Limpiar y escribir valor
                         elemento.clear()
@@ -191,10 +189,8 @@ class AseguradoraProcessor:
                     selector = accion['selector_html']
                     
                     try:
-                        # Buscar el elemento
-                        elemento = WebDriverWait(self.driver, 10).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                        )
+                        # Buscar el elemento con reintento
+                        elemento = self._buscar_boton_con_reintento(selector, f"Acción {selector}")
                         
                         if tipo.lower() == 'click':
                             elemento.click()
@@ -229,6 +225,10 @@ class AseguradoraProcessor:
                 url_anterior = self.driver.current_url
                 logger.info(f"📍 URL inicial: {url_anterior}")
                 
+                # Variables para control de timeout
+                timeout_authorization_ping = 30  # 30 segundos máximo en authorization.ping
+                tiempo_inicio_ping = None
+                
                 # Esperar hasta que llegue a la página final (máximo 120 segundos)
                 for intento in range(1, 41):  # 40 intentos * 3 segundos = 120 segundos
                     time.sleep(3)
@@ -246,6 +246,64 @@ class AseguradoraProcessor:
                     else:
                         logger.info(f"   ⏳ Intento {intento}/40 - URL: {url_actual[:80]}...")
                         logger.info(f"      Título: {titulo_actual}")
+                    
+                    # 🔍 DETECTAR PÁGINA DE AUTORIZACIÓN.PING Y MANEJARLA
+                    if "authorization.ping" in url_actual:
+                        # Iniciar timer si es la primera vez que detectamos esta página
+                        if tiempo_inicio_ping is None:
+                            tiempo_inicio_ping = time.time()
+                            logger.info(f"🔄 ESTADO INTERMEDIO OAUTH2 DETECTADO en intento {intento}")
+                            logger.info(f"   📍 Página de autorización.ping: {url_actual}")
+                            logger.info(f"   📄 Título de la página: {titulo_actual}")
+                            logger.info(f"   ⏳ Esperando continuación del flujo OAuth2...")
+                        else:
+                            # Verificar timeout
+                            tiempo_transcurrido = time.time() - tiempo_inicio_ping
+                            if tiempo_transcurrido > timeout_authorization_ping:
+                                logger.warning(f"⚠️ TIMEOUT en página authorization.ping después de {timeout_authorization_ping} segundos")
+                                logger.warning(f"   🔄 Recargando página para forzar continuación...")
+                                
+                                try:
+                                    self.driver.refresh()
+                                    time.sleep(5)
+                                    tiempo_inicio_ping = None  # Resetear timer
+                                    continue
+                                except Exception as e:
+                                    logger.error(f"❌ Error recargando página: {e}")
+                                    break
+                        
+                        # Buscar elementos para continuar el flujo
+                        logger.info(f"   🔍 Buscando elementos para continuar el flujo...")
+                        try:
+                            # Buscar botones o enlaces para continuar
+                            elementos_continuar = self.driver.find_elements(By.CSS_SELECTOR, 
+                                'input[type="submit"], button, a, input[value*="continuar"], input[value*="siguiente"]')
+                            
+                            if elementos_continuar:
+                                logger.info(f"   ✅ Encontrados {len(elementos_continuar)} elementos para continuar")
+                                for i, elem in enumerate(elementos_continuar):
+                                    try:
+                                        texto = elem.text or elem.get_attribute('value') or elem.get_attribute('title') or 'sin-texto'
+                                        logger.info(f"      {i+1}. {elem.tag_name} - Texto: '{texto}'")
+                                        
+                                        # Intentar hacer clic en el primer elemento clickeable
+                                        if elem.is_enabled() and elem.is_displayed():
+                                            logger.info(f"   🎯 Haciendo clic en elemento {i+1} para continuar...")
+                                            elem.click()
+                                            logger.info(f"   ✅ Click ejecutado, esperando continuación...")
+                                            time.sleep(2)
+                                            tiempo_inicio_ping = None  # Resetear timer después del click
+                                            break
+                                    except Exception as e:
+                                        logger.warning(f"   ⚠️ No se pudo hacer clic en elemento {i+1}: {e}")
+                            else:
+                                logger.info(f"   ℹ️ No se encontraron elementos clickeables en la página de autorización.ping")
+                                
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Error buscando elementos de continuación: {e}")
+                        
+                        # Continuar esperando
+                        continue
                     
                     # 🔍 DETECTAR SI VOLVIMOS AL LOGIN Y REINTENTAR
                     if "authorization.oauth2" in url_actual and intentos_login < max_intentos_login:
@@ -728,8 +786,27 @@ class AseguradoraProcessor:
             return True
             
         except Exception as e:
+            error_msg = str(e)
             logger.error(f"❌ Error ejecutando login: {e}")
-            return False
+            
+            # Detectar errores de sesión desconectada
+            if "target frame detached" in error_msg or "invalid session id" in error_msg or "session deleted" in error_msg:
+                logger.warning("🔄 Error de sesión desconectada detectado")
+                
+                # Intentar recrear la sesión del navegador
+                if self._recrear_sesion_navegador():
+                    logger.info("🔄 Sesión recreada - Reintentando login...")
+                    # Reintentar el login una vez más
+                    try:
+                        return self._ejecutar_login_aseguradora(url_info, nombre_aseguradora)
+                    except Exception as e2:
+                        logger.error(f"❌ Error en reintento de login: {e2}")
+                        return False
+                else:
+                    logger.error("❌ No se pudo recrear la sesión del navegador")
+                    return False
+            else:
+                return False
     
     def capturar_informacion_pantalla(self, id_url, nombre_aseguradora=None, datos_mensaje=None):
         """Captura información de la pantalla post-login y la almacena en la base de datos"""
@@ -806,9 +883,7 @@ class AseguradoraProcessor:
                     if tipo_campo.lower() == 'input':
                         # Buscar el campo de entrada
                         logger.info(f"🔍 Buscando elemento con selector: {selector_css}")
-                        elemento = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, selector_css))
-                        )
+                        elemento = self._buscar_elemento_con_reintento(selector_css, f"Campo {selector_css}")
                         
                         # Mostrar información del elemento encontrado
                         logger.info(f"✅ Elemento encontrado: {elemento.tag_name}")
@@ -828,9 +903,7 @@ class AseguradoraProcessor:
                         logger.info(f"   📍 URL actual antes de buscar botón: {self.driver.current_url}")
                         
                         try:
-                            boton = WebDriverWait(self.driver, 10).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, boton_envio))
-                            )
+                            boton = self._buscar_boton_con_reintento(boton_envio, f"Botón {boton_envio}")
                             logger.info(f"✅ Botón encontrado: {boton.tag_name} - Texto: '{boton.text}'")
                             logger.info(f"   📍 URL antes del clic en botón: {self.driver.current_url}")
                             
@@ -884,7 +957,7 @@ class AseguradoraProcessor:
                         
                         # Capturar la tabla de resultados
                         logger.info("📊 Iniciando captura de tabla de resultados...")
-                        return self._capturar_tabla_resultados_pale_ec(nombre_completo)
+                        return self._capturar_tabla_resultados_pale_ec(nombre_completo, datos_mensaje)
                         
                     else:
                         logger.info(f"ℹ️ Campo {nombre_campo} no es de tipo input, saltando...")
@@ -942,7 +1015,7 @@ class AseguradoraProcessor:
             logger.error(f"❌ Error construyendo nombre completo: {e}")
             return None
     
-    def _capturar_tabla_resultados_pale_ec(self, nombre_completo_cliente=None):
+    def _capturar_tabla_resultados_pale_ec(self, nombre_completo_cliente=None, datos_mensaje=None):
         """Captura la tabla de resultados con clase GridViewStylePV y busca el cliente específico"""
         try:
             logger.info("📊 Capturando tabla de resultados...")
@@ -1011,6 +1084,16 @@ class AseguradoraProcessor:
                                 logger.info(f"      • No. Dependiente: {fila_data.get('No. Dependiente', 'N/A')}")
                                 logger.info(f"      • Relación: {fila_data.get('Relacion', 'N/A')}")
                                 logger.info(f"      • Tipo de Póliza: {fila_data.get('Tipo de Póliza', 'N/A')}")
+                                
+                                # 🚀 GUARDAR INFORMACIÓN EN BASE DE DATOS INMEDIATAMENTE
+                                if datos_mensaje:
+                                    logger.info("💾 Guardando información del cliente en base de datos...")
+                                    if self._guardar_cliente_en_bd(fila_data, datos_mensaje):
+                                        logger.info("✅ Cliente guardado exitosamente en base de datos")
+                                    else:
+                                        logger.error("❌ Error guardando cliente en base de datos")
+                                else:
+                                    logger.warning("⚠️ No hay datos del mensaje para guardar en BD")
                                 
                                 # Una vez encontrado el cliente, no necesitamos seguir procesando
                                 logger.info("✅ Cliente encontrado - deteniendo búsqueda")
@@ -1126,6 +1209,267 @@ class AseguradoraProcessor:
             
         except Exception as e:
             logger.error(f"❌ Error validando status del cliente: {e}")
+            return False
+    
+    def _guardar_cliente_en_bd(self, fila_data, datos_mensaje):
+        """Actualiza o inserta la información del cliente en la base de datos NeptunoMedicalAutomatico"""
+        try:
+            import uuid
+            from datetime import datetime
+            
+            logger.info("💾 Iniciando proceso de actualización/inserción en base de datos...")
+            logger.info("=" * 60)
+            
+            # Obtener IdFactura e IdAseguradora del mensaje (si están disponibles)
+            id_factura = datos_mensaje.get('IdFactura')
+            id_aseguradora = datos_mensaje.get('IdAseguradora')
+            
+            logger.info(f"🔍 Buscando coincidencias con:")
+            logger.info(f"   • IdFactura: {id_factura}")
+            logger.info(f"   • IdAseguradora: {id_aseguradora}")
+            
+            # Si tenemos IdFactura e IdAseguradora, intentar UPDATE primero
+            if id_factura and id_aseguradora:
+                logger.info("🔄 Intentando UPDATE - Buscando registro existente...")
+                
+                # Query para buscar registro existente
+                select_query = """
+                    SELECT [IdfacturaCliente], [NumPoliza], [NumDependiente]
+                    FROM [NeptunoMedicalAutomatico].[dbo].[FacturaCliente]
+                    WHERE [IdFactura] = :IdFactura 
+                    AND [IdAseguradora] = :IdAseguradora
+                    AND [estado] = 1
+                """
+                
+                # Buscar registro existente
+                registro_existente = self.db_manager.execute_query(
+                    select_query, 
+                    {'IdFactura': id_factura, 'IdAseguradora': id_aseguradora}
+                )
+                
+                if registro_existente and len(registro_existente) > 0:
+                    # ✅ REGISTRO ENCONTRADO - HACER UPDATE
+                    registro = registro_existente[0]
+                    id_factura_cliente = registro['IdfacturaCliente']
+                    
+                    logger.info(f"✅ Registro encontrado - ID: {id_factura_cliente}")
+                    logger.info(f"   📋 Póliza actual: {registro.get('NumPoliza', 'N/A')}")
+                    logger.info(f"   📋 Dependiente actual: {registro.get('NumDependiente', 'N/A')}")
+                    
+                    # Preparar datos para UPDATE
+                    datos_update = {
+                        'IdfacturaCliente': id_factura_cliente,
+                        'NumPoliza': fila_data.get('Póliza', ''),
+                        'NumDependiente': fila_data.get('No. Dependiente', '')
+                    }
+                    
+                    # Query de UPDATE
+                    update_query = """
+                        UPDATE [NeptunoMedicalAutomatico].[dbo].[FacturaCliente]
+                        SET [NumPoliza] = :NumPoliza,
+                            [NumDependiente] = :NumDependiente
+                        WHERE [IdfacturaCliente] = :IdfacturaCliente
+                    """
+                    
+                    # Ejecutar UPDATE
+                    logger.info("🔄 Ejecutando UPDATE...")
+                    logger.info(f"   📋 Nueva Póliza: {datos_update['NumPoliza']}")
+                    logger.info(f"   📋 Nuevo Dependiente: {datos_update['NumDependiente']}")
+                    
+                    resultado_update = self.db_manager.execute_query(update_query, datos_update)
+                    
+                    if resultado_update:
+                        logger.info("✅ UPDATE ejecutado exitosamente")
+                        logger.info(f"   🆔 ID actualizado: {id_factura_cliente}")
+                        logger.info(f"   📋 Póliza actualizada: {datos_update['NumPoliza']}")
+                        logger.info(f"   📋 Dependiente actualizado: {datos_update['NumDependiente']}")
+                        return True
+                    else:
+                        logger.error("❌ Error en UPDATE - resultado vacío")
+                        return False
+                        
+                else:
+                    # ⚠️ NO SE ENCONTRÓ REGISTRO - HACER INSERT
+                    logger.info("⚠️ No se encontró registro existente - Procediendo con INSERT...")
+                    return self._insertar_nuevo_cliente(fila_data, datos_mensaje)
+                    
+            else:
+                # ⚠️ NO HAY IdFactura o IdAseguradora - HACER INSERT
+                logger.info("⚠️ No se proporcionaron IdFactura o IdAseguradora - Procediendo con INSERT...")
+                return self._insertar_nuevo_cliente(fila_data, datos_mensaje)
+                
+        except Exception as e:
+            logger.error(f"❌ Error en proceso de actualización/inserción: {e}")
+            logger.error(f"   📍 Error tipo: {type(e).__name__}")
+            return False
+    
+    def _buscar_elemento_con_reintento(self, selector, nombre_campo, max_reintentos=2):
+        """Busca un elemento con reintento de recarga de página si no se encuentra"""
+        for intento in range(1, max_reintentos + 1):
+            try:
+                logger.info(f"🔍 Buscando elemento '{nombre_campo}' (intento {intento}/{max_reintentos})...")
+                logger.info(f"   📍 Selector: {selector}")
+                
+                # Intentar encontrar el elemento
+                elemento = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                
+                logger.info(f"✅ Elemento '{nombre_campo}' encontrado en intento {intento}")
+                return elemento
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Elemento '{nombre_campo}' no encontrado en intento {intento}")
+                logger.warning(f"   📍 Error: {e}")
+                
+                if intento < max_reintentos:
+                    logger.info(f"🔄 Recargando página para intento {intento + 1}...")
+                    logger.info(f"   📍 URL actual: {self.driver.current_url}")
+                    
+                    # Recargar la página
+                    self.driver.refresh()
+                    time.sleep(3)  # Esperar a que se recargue
+                    
+                    logger.info(f"✅ Página recargada - URL: {self.driver.current_url}")
+                else:
+                    logger.error(f"❌ Elemento '{nombre_campo}' no encontrado después de {max_reintentos} intentos")
+                    raise e
+        
+        return None
+    
+    def _buscar_boton_con_reintento(self, selector, nombre_campo, max_reintentos=2):
+        """Busca un botón con reintento de recarga de página si no se encuentra"""
+        for intento in range(1, max_reintentos + 1):
+            try:
+                logger.info(f"🔍 Buscando botón para '{nombre_campo}' (intento {intento}/{max_reintentos})...")
+                logger.info(f"   📍 Selector: {selector}")
+                
+                # Intentar encontrar el botón
+                boton = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                )
+                
+                logger.info(f"✅ Botón para '{nombre_campo}' encontrado en intento {intento}")
+                return boton
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Botón para '{nombre_campo}' no encontrado en intento {intento}")
+                logger.warning(f"   📍 Error: {e}")
+                
+                if intento < max_reintentos:
+                    logger.info(f"🔄 Recargando página para intento {intento + 1}...")
+                    logger.info(f"   📍 URL actual: {self.driver.current_url}")
+                    
+                    # Recargar la página
+                    self.driver.refresh()
+                    time.sleep(3)  # Esperar a que se recargue
+                    
+                    logger.info(f"✅ Página recargada - URL: {self.driver.current_url}")
+                else:
+                    logger.error(f"❌ Botón para '{nombre_campo}' no encontrado después de {max_reintentos} intentos")
+                    raise e
+        
+        return None
+    
+    def _recrear_sesion_navegador(self):
+        """Recrea la sesión del navegador cuando se detecta desconexión"""
+        try:
+            logger.warning("🔄 Detectada desconexión del navegador - Recreando sesión...")
+            
+            # Cerrar el driver actual si existe
+            if hasattr(self, 'driver') and self.driver:
+                try:
+                    self.driver.quit()
+                    logger.info("✅ Driver anterior cerrado")
+                except:
+                    pass
+            
+            # Crear nuevo driver
+            logger.info("🔧 Creando nuevo driver de Edge...")
+            edge_options = Options()
+            edge_options.add_argument("--no-sandbox")
+            edge_options.add_argument("--disable-dev-shm-usage")
+            edge_options.add_argument("--window-size=1920,1080")
+            edge_options.add_argument("--disable-blink-features=AutomationControlled")
+            edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            edge_options.add_experimental_option('useAutomationExtension', False)
+            
+            self.driver = webdriver.Edge(options=edge_options)
+            self.driver.set_page_load_timeout(30)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            logger.info("✅ Nueva sesión del navegador creada exitosamente")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error recreando sesión del navegador: {e}")
+            return False
+    
+    def _insertar_nuevo_cliente(self, fila_data, datos_mensaje):
+        """Inserta un nuevo cliente en la base de datos"""
+        try:
+            import uuid
+            
+            logger.info("➕ INSERTANDO NUEVO CLIENTE...")
+            logger.info("=" * 60)
+            
+            # Generar ID único para el cliente
+            id_factura_cliente = str(uuid.uuid4())
+            logger.info(f"🆔 ID generado: {id_factura_cliente}")
+            
+            # Preparar datos para inserción
+            datos_insercion = {
+                'IdfacturaCliente': id_factura_cliente,
+                'IdFactura': datos_mensaje.get('IdFactura'),
+                'IdAseguradora': datos_mensaje.get('IdAseguradora'),
+                'NumDocIdentidad': datos_mensaje.get('NumDocIdentidad', ''),
+                'ClientePersonaPrimerNombre': datos_mensaje.get('PersonaPrimerNombre', ''),
+                'ClientePersonaSegundoNombre': datos_mensaje.get('PersonaSegundoNombre', ''),
+                'ClientePersonaPrimerApellido': datos_mensaje.get('PersonaPrimerApellido', ''),
+                'ClientePersonaSegundoApellido': datos_mensaje.get('PersonaSegundoApellido', ''),
+                'NumPoliza': fila_data.get('Póliza', ''),
+                'NumDependiente': fila_data.get('No. Dependiente', ''),
+                'estado': 1  # 1 = Activo
+            }
+            
+            # Mostrar datos que se van a insertar
+            logger.info("📋 Datos a insertar en FacturaCliente:")
+            for campo, valor in datos_insercion.items():
+                logger.info(f"   • {campo}: '{valor}'")
+            
+            # Query de inserción
+            insert_query = """
+                INSERT INTO [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] (
+                    [IdfacturaCliente], [IdFactura], [IdAseguradora], [NumDocIdentidad],
+                    [ClientePersonaPrimerNombre], [ClientePersonaSegundoNombre],
+                    [ClientePersonaPrimerApellido], [ClientePersonaSegundoApellido],
+                    [NumPoliza], [NumDependiente], [estado]
+                ) VALUES (
+                    :IdfacturaCliente, :IdFactura, :IdAseguradora, :NumDocIdentidad,
+                    :ClientePersonaPrimerNombre, :ClientePersonaSegundoNombre,
+                    :ClientePersonaPrimerApellido, :ClientePersonaSegundoApellido,
+                    :NumPoliza, :NumDependiente, :estado
+                )
+            """
+            
+            # Ejecutar inserción
+            logger.info("🚀 Ejecutando INSERT...")
+            resultado = self.db_manager.execute_query(insert_query, datos_insercion)
+            
+            if resultado:
+                logger.info("✅ Cliente insertado exitosamente en base de datos")
+                logger.info(f"   🆔 ID: {id_factura_cliente}")
+                logger.info(f"   📋 Póliza: {datos_insercion['NumPoliza']}")
+                logger.info(f"   📋 Dependiente: {datos_insercion['NumDependiente']}")
+                logger.info(f"   👤 Cliente: {datos_insercion['ClientePersonaPrimerNombre']} {datos_insercion['ClientePersonaPrimerApellido']}")
+                return True
+            else:
+                logger.error("❌ Error en la inserción - resultado vacío")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error insertando nuevo cliente: {e}")
+            logger.error(f"   📍 Error tipo: {type(e).__name__}")
             return False
             
         except TimeoutException:
