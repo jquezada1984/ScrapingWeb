@@ -54,10 +54,22 @@ class DatabaseManager:
                     columns = result.keys()
                     return [dict(zip(columns, row)) for row in result.fetchall()]
                 else:
+                    # Para operaciones INSERT, UPDATE, DELETE, hacer commit y retornar el resultado
                     session.commit()
-                    return []
+                    return result
         except SQLAlchemyError as e:
-            logger.error(f"Error al ejecutar consulta: {e}")
+            logger.error(f"❌ ERROR SQLAlchemy ejecutando consulta:")
+            logger.error(f"   • Tipo: {type(e).__name__}")
+            logger.error(f"   • Mensaje: {str(e)}")
+            logger.error(f"   • Query: {query}")
+            logger.error(f"   • Parámetros: {params}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ ERROR INESPERADO ejecutando consulta:")
+            logger.error(f"   • Tipo: {type(e).__name__}")
+            logger.error(f"   • Mensaje: {str(e)}")
+            logger.error(f"   • Query: {query}")
+            logger.error(f"   • Parámetros: {params}")
             raise
     
     def insert_data(self, table_name: str, data: Dict[str, Any]) -> bool:
@@ -97,6 +109,50 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             logger.error(f"Error al crear tabla {table_name}: {e}")
             raise
+    
+    def get_url_aseguradora(self, nombre_aseguradora: str) -> Optional[Dict]:
+        """Obtiene la información de URL de una aseguradora por su nombre"""
+        try:
+            logger.info(f"🔍 DEBUG: Buscando aseguradora con nombre: '{nombre_aseguradora}' (tipo: {type(nombre_aseguradora)})")
+            
+            query = """
+                SELECT id, nombre, url_login, url_destino, descripcion, fecha_creacion
+                FROM urls_automatizacion 
+                WHERE nombre = :nombre_aseguradora
+            """
+            
+            logger.info(f"🔍 DEBUG: Ejecutando query: {query}")
+            logger.info(f"🔍 DEBUG: Con parámetros: {{'nombre_aseguradora': '{nombre_aseguradora}'}}")
+            
+            result = self.execute_query(query, {'nombre_aseguradora': nombre_aseguradora})
+            
+            logger.info(f"🔍 DEBUG: Resultado de la consulta: {result}")
+            
+            if result:
+                url_info = result[0]
+                logger.info(f"✅ URL encontrada para aseguradora '{nombre_aseguradora}': {url_info.get('nombre', 'Sin nombre')}")
+                return url_info
+            else:
+                logger.warning(f"⚠️ No se encontró URL para aseguradora '{nombre_aseguradora}'")
+                
+                # Intentar ver qué aseguradoras existen en la base de datos
+                logger.info("🔍 DEBUG: Verificando qué aseguradoras existen en la base de datos...")
+                try:
+                    all_aseguradoras = self.execute_query("SELECT TOP 10 id, nombre FROM urls_automatizacion")
+                    if all_aseguradoras:
+                        logger.info("📋 Aseguradoras disponibles en la base de datos:")
+                        for aseguradora in all_aseguradoras:
+                            logger.info(f"   • ID: {aseguradora.get('id')}, Nombre: {aseguradora.get('nombre')}")
+                    else:
+                        logger.warning("⚠️ No se encontraron aseguradoras en la tabla urls_automatizacion")
+                except Exception as debug_e:
+                    logger.error(f"❌ Error verificando aseguradoras disponibles: {debug_e}")
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo URL de aseguradora '{nombre_aseguradora}': {e}")
+            return None
     
     def close(self):
         """Cierra la conexión a la base de datos"""

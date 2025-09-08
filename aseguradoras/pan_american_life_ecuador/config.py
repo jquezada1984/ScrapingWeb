@@ -70,22 +70,22 @@ ACCIONES_POST_LOGIN = [
 
 # Configuración de Selenium específica para esta aseguradora
 SELENIUM_CONFIG = {
-    'timeout_pagina': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_PAGINA')),
-    'timeout_elementos': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_ELEMENTOS')),
-    'espera_post_login': int(os.getenv('PALE_EC_SELENIUM_ESPERA_POST_LOGIN')),
-    'user_agent': os.getenv('PALE_EC_SELENIUM_USER_AGENT'),
-    'window_size': os.getenv('PALE_EC_SELENIUM_WINDOW_SIZE'),
+    'timeout_pagina': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_PAGINA', '30')),
+    'timeout_elementos': int(os.getenv('PALE_EC_SELENIUM_TIMEOUT_ELEMENTOS', '10')),
+    'espera_post_login': int(os.getenv('PALE_EC_SELENIUM_ESPERA_POST_LOGIN', '5')),
+    'user_agent': os.getenv('PALE_EC_SELENIUM_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
+    'window_size': os.getenv('PALE_EC_SELENIUM_WINDOW_SIZE', '1920,1080'),
     'headless': os.getenv('PALE_EC_SELENIUM_HEADLESS', 'true').lower() == 'true',
     'opciones_especiales': os.getenv('PALE_EC_SELENIUM_OPCIONES_ESPECIALES', '').split(',') if os.getenv('PALE_EC_SELENIUM_OPCIONES_ESPECIALES') else []
 }
 
 # Configuración de esperas y timeouts
 TIMEOUTS = {
-    'carga_pagina': int(os.getenv('PALE_EC_TIMEOUT_CARGA_PAGINA')),
-    'elemento_visible': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_VISIBLE')),
-    'elemento_clicable': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_CLICABLE')),
-    'procesamiento_login': int(os.getenv('PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN')),
-    'navegacion': int(os.getenv('PALE_EC_TIMEOUT_NAVEGACION'))
+    'carga_pagina': int(os.getenv('PALE_EC_TIMEOUT_CARGA_PAGINA', '30')),
+    'elemento_visible': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_VISIBLE', '10')),
+    'elemento_clicable': int(os.getenv('PALE_EC_TIMEOUT_ELEMENTO_CLICABLE', '10')),
+    'procesamiento_login': int(os.getenv('PALE_EC_TIMEOUT_PROCESAMIENTO_LOGIN', '5')),
+    'navegacion': int(os.getenv('PALE_EC_TIMEOUT_NAVEGACION', '30'))
 }
 
 # Validaciones post-login

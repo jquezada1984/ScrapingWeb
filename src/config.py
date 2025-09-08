@@ -2,6 +2,8 @@ import os
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
+# Intentar cargar desde config_neptuno.env primero, luego .env
+load_dotenv('config_neptuno.env')
 load_dotenv()
 
 # IMPORTANTE: Todas las configuraciones se obtienen del archivo .env
@@ -77,10 +79,11 @@ class Config:
             errores.append("RABBITMQ_HOST no está definido en .env")
         if not cls.RABBITMQ_PORT:
             errores.append("RABBITMQ_PORT no está definido en .env")
-        if not cls.RABBITMQ_USERNAME:
-            errores.append("RABBITMQ_USERNAME no está definido en .env")
-        if not cls.RABBITMQ_PASSWORD:
-            errores.append("RABBITMQ_PASSWORD no está definido en .env")
+        # RABBITMQ_USERNAME y RABBITMQ_PASSWORD pueden estar vacíos para conexión sin autenticación
+        # if not cls.RABBITMQ_USERNAME:
+        #     errores.append("RABBITMQ_USERNAME no está definido en .env")
+        # if not cls.RABBITMQ_PASSWORD:
+        #     errores.append("RABBITMQ_PASSWORD no está definido en .env")
         if not cls.RABBITMQ_QUEUE:
             errores.append("RABBITMQ_QUEUE no está definido en .env")
         if not cls.RABBITMQ_EXCHANGE:

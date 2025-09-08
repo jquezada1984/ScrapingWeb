@@ -631,13 +631,13 @@ class ScrapingWorker:
             if not self.processor.setup_selenium_driver():
                 logger.error("❌ No se pudo configurar Selenium")
                 return False
-    
+            
             self.running = True
             logger.info("✅ Worker iniciado correctamente")
             
             # Iniciar procesamiento de mensajes
             self._process_messages()
-                
+            
         except Exception as e:
             logger.error(f"❌ Error iniciando worker: {e}")
             return False
@@ -646,33 +646,6 @@ class ScrapingWorker:
         """Procesa mensajes de la cola de RabbitMQ"""
         try:
             logger.info("📨 Iniciando procesamiento de mensajes...")
-            
-            # Mostrar información detallada de la cola
-            logger.info(f"🔍 Configuración de cola:")
-            logger.info(f"   • Nombre de cola: '{Config.RABBITMQ_QUEUE}'")
-            logger.info(f"   • Exchange: '{Config.RABBITMQ_EXCHANGE}'")
-            logger.info(f"   • Routing key: '{Config.RABBITMQ_ROUTING_KEY}'")
-            logger.info(f"   • Host: {Config.RABBITMQ_HOST}:{Config.RABBITMQ_PORT}")
-            
-            # Verificar estado de la cola antes de empezar a consumir
-            try:
-                queue_info = self.processor.rabbitmq_channel.queue_declare(
-                    queue=Config.RABBITMQ_QUEUE, 
-                    passive=True
-                )
-                message_count = queue_info.method.message_count
-                consumer_count = queue_info.method.consumer_count
-                logger.info(f"📊 Estado de la cola '{Config.RABBITMQ_QUEUE}':")
-                logger.info(f"   • Mensajes en cola: {message_count}")
-                logger.info(f"   • Consumidores activos: {consumer_count}")
-                
-                if message_count > 0:
-                    logger.info(f"✅ Hay {message_count} mensaje(s) esperando ser procesados")
-                else:
-                    logger.info("⏳ No hay mensajes en la cola, esperando nuevos mensajes...")
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ No se pudo verificar el estado de la cola: {e}")
             
             def callback(ch, method, properties, body):
                 try:
@@ -701,178 +674,45 @@ class ScrapingWorker:
             
             logger.info("⏳ Esperando mensajes...")
             self.processor.rabbitmq_channel.start_consuming()
-                
+            
         except Exception as e:
             logger.error(f"❌ Error en procesamiento de mensajes: {e}")
     
     def _process_single_message(self, mensaje):
         """Procesa un mensaje individual"""
         try:
-            # Mostrar información completa del mensaje recibido
-            logger.info("📋 INFORMACIÓN COMPLETA DEL MENSAJE:")
-            logger.info(f"   • Tipo de mensaje: {type(mensaje)}")
-            logger.info(f"   • Contenido del mensaje: {mensaje}")
-            
             # Obtener información de la aseguradora
-            # El NombreCompleto está dentro del array Clientes
-            nombre_aseguradora = None
-            
-            if 'Clientes' in mensaje and mensaje['Clientes']:
-                # Tomar el NombreCompleto del primer cliente
-                primer_cliente = mensaje['Clientes'][0]
-                nombre_aseguradora = primer_cliente.get('NombreCompleto')
-                logger.info(f"   • NombreCompleto extraído del primer cliente: '{nombre_aseguradora}' (tipo: {type(nombre_aseguradora)})")
-            else:
-                # Fallback: buscar directamente en el mensaje
-                nombre_aseguradora = mensaje.get('NombreCompleto')
-                logger.info(f"   • NombreCompleto extraído directamente: '{nombre_aseguradora}' (tipo: {type(nombre_aseguradora)})")
-            
-            if not nombre_aseguradora:
-                logger.error("❌ No se pudo encontrar NombreCompleto en el mensaje")
-                logger.info("   • Claves disponibles en el mensaje:")
-                for key in mensaje.keys():
-                    logger.info(f"     - {key}: {mensaje[key]}")
+            id_aseguradora = mensaje.get('IdAseguradora')
+            if not id_aseguradora:
+                logger.error("❌ Mensaje sin IdAseguradora")
                 return False
-    
+            
             # Obtener URL de la aseguradora
-            logger.info(f"🔍 Buscando URL para aseguradora: '{nombre_aseguradora}'")
-            url_info = self.processor.db_manager.get_url_aseguradora(nombre_aseguradora)
+            url_info = self.processor.db_manager.get_url_aseguradora(id_aseguradora)
             if not url_info:
-                logger.error(f"❌ No se encontró URL para aseguradora '{nombre_aseguradora}'")
+                logger.error(f"❌ No se encontró URL para aseguradora {id_aseguradora}")
                 return False
-                
-            # Ejecutar login una sola vez para la aseguradora
+            
+            # Ejecutar login
             if not self.processor.execute_login(url_info, mensaje):
                 logger.error("❌ Error en login")
                 return False
             
-            # Procesar cada cliente del array
-            clientes_procesados = 0
-            total_clientes = len(mensaje.get('Clientes', []))
-            logger.info(f"📋 Procesando {total_clientes} clientes...")
+            # Capturar información
+            if not self.processor.capturar_informacion_pantalla(
+                url_info['id_url'], 
+                url_info.get('nombre'), 
+                mensaje
+            ):
+                logger.error("❌ Error capturando información")
+                return False
             
-            for i, cliente in enumerate(mensaje.get('Clientes', [])):
-                try:
-                    logger.info(f"👤 Procesando cliente {i+1}/{total_clientes}")
-                    logger.info(f"   • IdFactura: {cliente.get('IdFactura')}")
-                    logger.info(f"   • NumDocIdentidad: {cliente.get('NumDocIdentidad')}")
-                    
-                    # Construir nombre completo del cliente
-                    nombre_completo_cliente = self._construir_nombre_completo_cliente(cliente)
-                    if not nombre_completo_cliente:
-                        logger.error(f"❌ No se pudo construir nombre completo para cliente {i+1}")
-                        continue
-                    
-                    logger.info(f"   • Nombre completo: '{nombre_completo_cliente}'")
-                    
-                    # Capturar información para este cliente específico
-                    # Para PAN AMERICAN LIFE DE ECUADOR, usar el procesador específico
-                    logger.info(f"🔍 Verificando nombre de aseguradora: '{url_info.get('nombre')}'")
-                    if url_info.get('nombre') == 'PAN AMERICAN LIFE DE ECUADOR':
-                        logger.info("🇪🇨 Usando procesador específico para PAN AMERICAN LIFE DE ECUADOR")
-                        try:
-                            from aseguradoras.pan_american_life_ecuador.implementacion_oauth2 import crear_procesador_oauth2
-                            logger.info("✅ Procesador específico importado correctamente")
-                            
-                            procesador_especifico = crear_procesador_oauth2(self.processor.db_manager)
-                            logger.info("✅ Procesador específico creado correctamente")
-                            
-                            # Usar el procesador específico que maneja toda la lógica
-                            logger.info("🔄 Iniciando procesamiento con procesador específico...")
-                            if procesador_especifico.procesar_oauth2_completo(self.processor.driver, cliente):
-                                clientes_procesados += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador específico")
-                            else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador específico")
-                                
-                        except ImportError as e:
-                            logger.error(f"❌ Error importando procesador específico: {e}")
-                            # Fallback a procesador genérico
-                            if self.processor.capturar_informacion_pantalla(
-                                url_info['id'], 
-                                url_info.get('nombre'), 
-                                cliente
-                            ):
-                                clientes_procesados += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
-                            else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
-                        except Exception as e:
-                            logger.error(f"❌ Error ejecutando procesador específico: {e}")
-                            # Fallback a procesador genérico
-                            if self.processor.capturar_informacion_pantalla(
-                                url_info['id'], 
-                                url_info.get('nombre'), 
-                                cliente
-                            ):
-                                clientes_procesados += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
-                            else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
-                    else:
-                        # Para otras aseguradoras, usar procesador genérico
-                        logger.info(f"🔄 Usando procesador genérico para aseguradora: '{url_info.get('nombre')}'")
-                        if self.processor.capturar_informacion_pantalla(
-                            url_info['id'], 
-                            url_info.get('nombre'), 
-                            cliente
-                        ):
-                            clientes_procesados += 1
-                            logger.info(f"✅ Cliente {i+1} procesado exitosamente")
-                        else:
-                            logger.error(f"❌ Error procesando cliente {i+1}")
-                
-                except Exception as e:
-                    logger.error(f"❌ Error procesando cliente {i+1}: {e}")
-                    continue
-            
-            logger.info(f"✅ Procesamiento completado: {clientes_procesados}/{total_clientes} clientes procesados exitosamente")
-            return clientes_procesados > 0
+            logger.info("✅ Mensaje procesado exitosamente")
+            return True
             
         except Exception as e:
             logger.error(f"❌ Error procesando mensaje individual: {e}")
             return False
-    
-    def _construir_nombre_completo_cliente(self, datos_cliente):
-        """Construye el nombre completo del cliente concatenando los campos"""
-        try:
-            logger.info("🔤 Construyendo nombre completo del cliente...")
-            
-            # Extraer campos del cliente
-            primer_nombre = datos_cliente.get('PersonaPrimerNombre', '').strip()
-            segundo_nombre = datos_cliente.get('PersonaSegundoNombre', '').strip()
-            primer_apellido = datos_cliente.get('PersonaPrimerApellido', '').strip()
-            segundo_apellido = datos_cliente.get('PersonaSegundoApellido', '').strip()
-            
-            logger.info(f"   📝 Primer nombre: '{primer_nombre}'")
-            logger.info(f"   📝 Segundo nombre: '{segundo_nombre}'")
-            logger.info(f"   📝 Primer apellido: '{primer_apellido}'")
-            logger.info(f"   📝 Segundo apellido: '{segundo_apellido}'")
-            
-            # Construir nombre completo
-            partes_nombre = []
-            
-            if primer_nombre:
-                partes_nombre.append(primer_nombre)
-            if segundo_nombre:
-                partes_nombre.append(segundo_nombre)
-            if primer_apellido:
-                partes_nombre.append(primer_apellido)
-            if segundo_apellido:
-                partes_nombre.append(segundo_apellido)
-            
-            if not partes_nombre:
-                logger.error("❌ No se pudo construir el nombre completo - todos los campos están vacíos")
-                return None
-            
-            nombre_completo = ' '.join(partes_nombre)
-            logger.info(f"✅ Nombre completo construido: '{nombre_completo}'")
-            
-            return nombre_completo
-                
-        except Exception as e:
-            logger.error(f"❌ Error construyendo nombre completo: {e}")
-            return None
 
 def main():
     """Función principal del worker"""
