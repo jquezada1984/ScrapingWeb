@@ -46,8 +46,85 @@ class AseguradoraProcessor:
         self.sesiones_aseguradoras = {}
         self.aseguradoras_activas = set()
         
-        logger.info("🚀 Procesador inicializado con caché de URLs y Selenium")
+        # Cache de búsquedas por NumDocIdentidad para evitar búsquedas repetidas
+        # Estructura: {num_doc_identidad: {'poliza': '...', 'dependiente': '...', 'status': '...'}}
+        self.cache_busquedas = {}
+        
+        logger.info("🚀 Procesador inicializado con caché de URLs, Selenium y búsquedas")
         logger.info("   • Gestión de sesiones por aseguradora habilitada")
+        logger.info("   • Cache de búsquedas por NumDocIdentidad habilitado")
+    
+    def _obtener_datos_del_cache(self, num_doc_identidad):
+        """Obtiene datos del caché si ya se buscó este NumDocIdentidad"""
+        if num_doc_identidad in self.cache_busquedas:
+            datos_cache = self.cache_busquedas[num_doc_identidad]
+            logger.info(f"🎯 CACHE HIT: NumDocIdentidad '{num_doc_identidad}' encontrado en caché")
+            logger.info(f"   • Póliza: {datos_cache.get('poliza', 'N/A')}")
+            logger.info(f"   • Dependiente: {datos_cache.get('dependiente', 'N/A')}")
+            logger.info(f"   • Status: {datos_cache.get('status', 'N/A')}")
+            return datos_cache
+        else:
+            logger.info(f"🔍 CACHE MISS: NumDocIdentidad '{num_doc_identidad}' no encontrado en caché")
+            return None
+    
+    def _guardar_en_cache(self, num_doc_identidad, datos_busqueda):
+        """Guarda los datos de búsqueda en el caché"""
+        self.cache_busquedas[num_doc_identidad] = datos_busqueda
+        logger.info(f"💾 CACHE SAVE: NumDocIdentidad '{num_doc_identidad}' guardado en caché")
+        logger.info(f"   • Póliza: {datos_busqueda.get('poliza', 'N/A')}")
+        logger.info(f"   • Dependiente: {datos_busqueda.get('dependiente', 'N/A')}")
+        logger.info(f"   • Status: {datos_busqueda.get('status', 'N/A')}")
+        logger.info(f"📊 Total elementos en caché: {len(self.cache_busquedas)}")
+    
+    def _limpiar_cache_busquedas(self):
+        """Limpia el caché de búsquedas (útil al cambiar de aseguradora)"""
+        elementos_antes = len(self.cache_busquedas)
+        self.cache_busquedas.clear()
+        logger.info(f"🧹 CACHE CLEAR: Caché de búsquedas limpiado ({elementos_antes} elementos eliminados)")
+    
+    def limpiar_browser(self, limpieza_profunda=False):
+        """Limpia el browser después del procesamiento"""
+        try:
+            if not self.driver:
+                logger.info("ℹ️ No hay driver activo para limpiar")
+                return True
+                
+            logger.info("🧹 Iniciando limpieza del browser...")
+            
+            if limpieza_profunda:
+                # Limpieza profunda: cerrar y reabrir el browser
+                logger.info("🔄 Realizando limpieza profunda del browser...")
+                self.driver.quit()
+                self.driver = None
+                logger.info("✅ Browser cerrado para limpieza profunda")
+            else:
+                # Limpieza ligera: limpiar cookies y storage
+                logger.info("🧽 Realizando limpieza ligera del browser...")
+                
+                # Limpiar cookies
+                self.driver.delete_all_cookies()
+                logger.info("   • Cookies eliminadas")
+                
+                # Limpiar localStorage y sessionStorage
+                self.driver.execute_script("window.localStorage.clear();")
+                self.driver.execute_script("window.sessionStorage.clear();")
+                logger.info("   • LocalStorage y SessionStorage limpiados")
+                
+                # Limpiar cache del browser
+                self.driver.execute_script("window.caches.keys().then(function(names) { for (let name of names) caches.delete(name); });")
+                logger.info("   • Cache del browser limpiado")
+                
+                # Navegar a una página en blanco
+                self.driver.get("about:blank")
+                logger.info("   • Navegado a página en blanco")
+                
+                logger.info("✅ Browser limpiado exitosamente (limpieza ligera)")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error limpiando browser: {e}")
+            return False
     
     def connect_rabbitmq(self):
         """Conecta a RabbitMQ"""
@@ -280,8 +357,36 @@ class AseguradoraProcessor:
         try:
             logger.info("📸 Capturando información específica para PAN AMERICAN LIFE DE ECUADOR...")
             
-            # Lógica específica para PAN AMERICAN LIFE DE ECUADOR
-            # Esta función actúa como fallback si el procesador específico no está disponible
+            # Obtener NumDocIdentidad para verificar caché
+            num_doc_identidad = datos_mensaje.get('NumDocIdentidad')
+            if not num_doc_identidad:
+                logger.error("❌ No se encontró NumDocIdentidad en los datos del mensaje")
+                return False
+            
+            # Verificar si ya tenemos estos datos en caché
+            datos_cache = self._obtener_datos_del_cache(num_doc_identidad)
+            if datos_cache:
+                # Usar datos del caché
+                logger.info("✅ Usando datos del caché para evitar búsqueda repetida")
+                
+                # Verificar si hay error en los datos del caché
+                if 'error' in datos_cache:
+                    logger.error(f"❌ Error en datos del caché: {datos_cache['error']}")
+                    # Guardar cliente con error en base de datos
+                    if not self._guardar_cliente_con_error(datos_mensaje, datos_cache['error']):
+                        logger.error("❌ Error guardando cliente con error en base de datos")
+                    return False
+                
+                # Guardar en base de datos usando datos del caché
+                if not self._guardar_cliente_en_bd(datos_cache, datos_mensaje):
+                    logger.error("❌ Error guardando en base de datos con datos del caché")
+                    return False
+                
+                logger.info("✅ Captura de información completada exitosamente usando caché")
+                return True
+            
+            # Si no está en caché, proceder con la búsqueda normal
+            logger.info("🔍 NumDocIdentidad no encontrado en caché, procediendo con búsqueda en página...")
             
             # Construir nombre completo del cliente
             nombre_completo = self._construir_nombre_completo(datos_mensaje)
@@ -295,7 +400,20 @@ class AseguradoraProcessor:
                 logger.error("❌ No se pudo capturar información de la tabla")
                 return False
             
-            # Guardar en base de datos
+            # Verificar si hay error en el resultado
+            if 'error' in resultado:
+                logger.error(f"❌ Error en captura: {resultado['error']}")
+                # Guardar en caché para futuras referencias
+                self._guardar_en_cache(num_doc_identidad, resultado)
+                # Guardar cliente con error en base de datos
+                if not self._guardar_cliente_con_error(datos_mensaje, resultado['error']):
+                    logger.error("❌ Error guardando cliente con error en base de datos")
+                return False
+            
+            # Guardar en caché para futuras referencias
+            self._guardar_en_cache(num_doc_identidad, resultado)
+            
+            # Guardar en base de datos (caso exitoso)
             if not self._guardar_cliente_en_bd(resultado, datos_mensaje):
                 logger.error("❌ Error guardando en base de datos")
                 return False
@@ -401,8 +519,16 @@ class AseguradoraProcessor:
                                     }
                                 else:
                                     logger.warning(f"⚠️ Cliente encontrado pero status no es 'Activo': {status_texto}")
+                                    return {
+                                        'error': f"Cliente encontrado pero status no es 'Activo': {status_texto}",
+                                        'tipo_error': 'STATUS_NO_ACTIVO'
+                                    }
                             else:
                                 logger.warning("⚠️ No se pudo verificar el status - estructura de tabla inesperada")
+                                return {
+                                    'error': "No se pudo verificar el status - estructura de tabla inesperada",
+                                    'tipo_error': 'ESTRUCTURA_TABLA_INESPERADA'
+                                }
                         else:
                             logger.info(f"   ❌ No coincide: '{nombre_paciente}' != '{nombre_completo_cliente}'")
                             
@@ -411,11 +537,17 @@ class AseguradoraProcessor:
                     continue
             
             logger.warning("⚠️ Cliente no encontrado en la tabla")
-            return None
+            return {
+                'error': f"Cliente '{nombre_completo_cliente}' no encontrado en la tabla de resultados",
+                'tipo_error': 'CLIENTE_NO_ENCONTRADO'
+            }
             
         except Exception as e:
             logger.error(f"❌ Error capturando tabla de resultados: {e}")
-            return None
+            return {
+                'error': f"Error capturando tabla de resultados: {str(e)}",
+                'tipo_error': 'ERROR_CAPTURA_TABLA'
+            }
     
     def _guardar_cliente_en_bd(self, fila_data, datos_mensaje):
         """Guarda la información del cliente en la base de datos"""
@@ -429,8 +561,15 @@ class AseguradoraProcessor:
             id_factura = datos_mensaje.get('IdFactura')
             id_aseguradora = datos_mensaje.get('IdAseguradora')
             
-            logger.info(f"   📋 IdFactura: {id_factura}")
-            logger.info(f"   📋 IdAseguradora: {id_aseguradora}")
+            # Convertir tipos de datos para asegurar compatibilidad con la BD
+            # Según la estructura de la tabla: IdFactura es [int] e IdAseguradora es [int]
+            if id_factura:
+                id_factura = int(id_factura)  # Convertir a int (tipo de la BD)
+            if id_aseguradora:
+                id_aseguradora = int(id_aseguradora)  # Asegurar que sea int
+            
+            logger.info(f"   📋 IdFactura: {id_factura} (tipo: {type(id_factura)})")
+            logger.info(f"   📋 IdAseguradora: {id_aseguradora} (tipo: {type(id_aseguradora)})")
             logger.info(f"   📋 NumPoliza: {num_poliza}")
             logger.info(f"   📋 NumDependiente: {num_dependiente}")
             
@@ -438,10 +577,13 @@ class AseguradoraProcessor:
             query_buscar = """
                 SELECT IdfacturaCliente, NumPoliza, NumDependiente 
                 FROM [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] 
-                WHERE IdFactura = ? AND IdAseguradora = ?
+                WHERE IdFactura = :id_factura AND IdAseguradora = :id_aseguradora
             """
             
-            resultado = self.db_manager.execute_query(query_buscar, (id_factura, id_aseguradora))
+            resultado = self.db_manager.execute_query(query_buscar, {
+                'id_factura': id_factura, 
+                'id_aseguradora': id_aseguradora
+            })
             
             if resultado:
                 # Actualizar registro existente
@@ -449,11 +591,16 @@ class AseguradoraProcessor:
                 
                 query_update = """
                     UPDATE [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] 
-                    SET NumPoliza = ?, NumDependiente = ?
-                    WHERE IdFactura = ? AND IdAseguradora = ?
+                    SET NumPoliza = :num_poliza, NumDependiente = :num_dependiente, estado = 1, error = NULL
+                    WHERE IdFactura = :id_factura AND IdAseguradora = :id_aseguradora
                 """
                 
-                self.db_manager.execute_query(query_update, (num_poliza, num_dependiente, id_factura, id_aseguradora))
+                self.db_manager.execute_query(query_update, {
+                    'num_poliza': num_poliza,
+                    'num_dependiente': num_dependiente,
+                    'id_factura': id_factura,
+                    'id_aseguradora': id_aseguradora
+                })
                 logger.info("✅ Registro actualizado exitosamente")
                 
             else:
@@ -482,21 +629,37 @@ class AseguradoraProcessor:
             cliente_primer_apellido = datos_mensaje.get('ClientePersonaPrimerApellido')
             cliente_segundo_apellido = datos_mensaje.get('ClientePersonaSegundoApellido')
             
+            # Convertir tipos de datos para asegurar compatibilidad con la BD
+            # Según la estructura de la tabla: IdFactura es [int] e IdAseguradora es [int]
+            if id_factura:
+                id_factura = int(id_factura)  # Convertir a int (tipo de la BD)
+            if id_aseguradora:
+                id_aseguradora = int(id_aseguradora)  # Asegurar que sea int
+            
             query_insert = """
                 INSERT INTO [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] 
                 (IdfacturaCliente, IdFactura, IdAseguradora, NumDocIdentidad, 
                  ClientePersonaPrimerNombre, ClientePersonaSegundoNombre, 
                  ClientePersonaPrimerApellido, ClientePersonaSegundoApellido, 
-                 NumPoliza, NumDependiente, estado)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 NumPoliza, NumDependiente, estado, error)
+                VALUES (:id_factura_cliente, :id_factura, :id_aseguradora, :num_doc_identidad, 
+                        :cliente_primer_nombre, :cliente_segundo_nombre, 
+                        :cliente_primer_apellido, :cliente_segundo_apellido, 
+                        :num_poliza, :num_dependiente, 1, NULL)
             """
             
-            params = (
-                id_factura_cliente, id_factura, id_aseguradora, num_doc_identidad,
-                cliente_primer_nombre, cliente_segundo_nombre,
-                cliente_primer_apellido, cliente_segundo_apellido,
-                num_poliza, num_dependiente
-            )
+            params = {
+                'id_factura_cliente': id_factura_cliente,
+                'id_factura': id_factura,
+                'id_aseguradora': id_aseguradora,
+                'num_doc_identidad': num_doc_identidad,
+                'cliente_primer_nombre': cliente_primer_nombre,
+                'cliente_segundo_nombre': cliente_segundo_nombre,
+                'cliente_primer_apellido': cliente_primer_apellido,
+                'cliente_segundo_apellido': cliente_segundo_apellido,
+                'num_poliza': num_poliza,
+                'num_dependiente': num_dependiente
+            }
             
             self.db_manager.execute_query(query_insert, params)
             logger.info("✅ Nuevo cliente insertado exitosamente")
@@ -504,6 +667,130 @@ class AseguradoraProcessor:
         except Exception as e:
             logger.error(f"❌ Error insertando nuevo cliente: {e}")
             raise
+    
+    def _guardar_cliente_con_error(self, datos_mensaje, mensaje_error):
+        """Guarda un cliente con error en la base de datos"""
+        try:
+            logger.info(f"💾 Guardando cliente con error: {mensaje_error}")
+            logger.info(f"   • Parámetros: {datos_mensaje}")
+            
+            # Extraer datos del mensaje - manejar tanto mensaje completo como cliente individual
+            id_factura = datos_mensaje.get('IdFactura')
+            id_aseguradora = datos_mensaje.get('IdAseguradora')
+            num_doc_identidad = datos_mensaje.get('NumDocIdentidad')
+            
+            # Convertir tipos de datos para asegurar compatibilidad con la BD
+            # Según la estructura de la tabla: IdFactura es [int] e IdAseguradora es [int]
+            logger.info(f"🔧 CONVERSIÓN DE TIPOS:")
+            logger.info(f"   • IdFactura ANTES: {id_factura} (tipo: {type(id_factura)})")
+            logger.info(f"   • IdAseguradora ANTES: {id_aseguradora} (tipo: {type(id_aseguradora)})")
+            
+            if id_factura:
+                id_factura = int(id_factura)  # Convertir a int (tipo de la BD)
+                logger.info(f"   • IdFactura DESPUÉS: {id_factura} (tipo: {type(id_factura)})")
+            if id_aseguradora:
+                id_aseguradora = int(id_aseguradora)  # Asegurar que sea int
+                logger.info(f"   • IdAseguradora DESPUÉS: {id_aseguradora} (tipo: {type(id_aseguradora)})")
+            
+            # Extraer datos del cliente si están disponibles
+            cliente_primer_nombre = None
+            cliente_segundo_nombre = None
+            cliente_primer_apellido = None
+            cliente_segundo_apellido = None
+            
+            # Si es un mensaje completo con array Clientes
+            if 'Clientes' in datos_mensaje and datos_mensaje['Clientes']:
+                cliente = datos_mensaje['Clientes'][0]
+                cliente_primer_nombre = cliente.get('PersonaPrimerNombre')
+                cliente_segundo_nombre = cliente.get('PersonaSegundoNombre')
+                cliente_primer_apellido = cliente.get('PersonaPrimerApellido')
+                cliente_segundo_apellido = cliente.get('PersonaSegundoApellido')
+                if not num_doc_identidad:
+                    num_doc_identidad = cliente.get('NumDocIdentidad')
+            else:
+                # Si es un cliente individual (del procesador específico)
+                cliente_primer_nombre = datos_mensaje.get('PersonaPrimerNombre')
+                cliente_segundo_nombre = datos_mensaje.get('PersonaSegundoNombre')
+                cliente_primer_apellido = datos_mensaje.get('PersonaPrimerApellido')
+                cliente_segundo_apellido = datos_mensaje.get('PersonaSegundoApellido')
+                if not num_doc_identidad:
+                    num_doc_identidad = datos_mensaje.get('NumDocIdentidad')
+            
+            logger.info(f"   • IdFactura: {id_factura} (tipo: {type(id_factura)})")
+            logger.info(f"   • IdAseguradora: {id_aseguradora} (tipo: {type(id_aseguradora)})")
+            logger.info(f"   • NumDocIdentidad: {num_doc_identidad}")
+            
+            # Buscar si ya existe un registro
+            query_buscar = """
+                SELECT IdfacturaCliente, error, IdFactura, IdAseguradora
+                FROM [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] 
+                WHERE IdFactura = :id_factura AND IdAseguradora = :id_aseguradora
+            """
+            
+            logger.info(f"🔍 Ejecutando SELECT para buscar registro:")
+            logger.info(f"   • Query: {query_buscar}")
+            logger.info(f"   • Parámetros: {{'id_factura': {id_factura}, 'id_aseguradora': {id_aseguradora}}}")
+            
+            resultado = self.db_manager.execute_query(query_buscar, {
+                'id_factura': id_factura, 
+                'id_aseguradora': id_aseguradora
+            })
+            
+            logger.info(f"📊 Resultado del SELECT: {resultado}")
+            if resultado:
+                logger.info(f"   • Registros encontrados: {len(resultado)}")
+                for i, reg in enumerate(resultado):
+                    logger.info(f"   • Registro {i+1}: IdFactura={reg.get('IdFactura')} (tipo: {type(reg.get('IdFactura'))}), IdAseguradora={reg.get('IdAseguradora')} (tipo: {type(reg.get('IdAseguradora'))})")
+            else:
+                logger.info("   • No se encontraron registros")
+            
+            if resultado:
+                # Actualizar registro existente con error
+                logger.info("🔄 Actualizando registro existente con error...")
+                
+                query_update = """
+                    UPDATE [NeptunoMedicalAutomatico].[dbo].[FacturaCliente] 
+                    SET error = :mensaje_error, estado = 0
+                    WHERE IdFactura = :id_factura AND IdAseguradora = :id_aseguradora
+                """
+                
+                logger.info(f"🔄 Ejecutando UPDATE para actualizar registro:")
+                logger.info(f"   • Query: {query_update}")
+                logger.info(f"   • Parámetros: {{'mensaje_error': '{mensaje_error}', 'id_factura': {id_factura}, 'id_aseguradora': {id_aseguradora}}}")
+                
+                result_update = self.db_manager.execute_query(query_update, {
+                    'mensaje_error': mensaje_error,
+                    'id_factura': id_factura,
+                    'id_aseguradora': id_aseguradora
+                })
+                
+                # Verificar filas afectadas
+                try:
+                    # Para UPDATE, el resultado es un objeto Result de SQLAlchemy
+                    if hasattr(result_update, 'rowcount'):
+                        filas_afectadas = result_update.rowcount
+                        logger.info(f"📊 Filas afectadas por UPDATE: {filas_afectadas}")
+                        if filas_afectadas > 0:
+                            logger.info("✅ Registro actualizado con error exitosamente")
+                        else:
+                            logger.warning("⚠️ UPDATE ejecutado pero 0 filas afectadas - posible problema de tipos de datos")
+                    else:
+                        logger.info("✅ UPDATE ejecutado (sin información de filas afectadas)")
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudo obtener información de filas afectadas: {e}")
+                    logger.info("✅ UPDATE ejecutado (sin verificación de filas afectadas)")
+                
+            else:
+                # No insertar nuevos registros, solo actualizar existentes
+                logger.warning("⚠️ No se encontró registro existente para actualizar")
+                logger.info("ℹ️ Solo se actualizan registros existentes, no se insertan nuevos")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error guardando cliente con error: {e}")
+            logger.error(f"   • Parámetros: {datos_mensaje}")
+            return False
     
     def _buscar_elemento_con_reintento(self, selector, nombre_campo, max_reintentos=2):
         """Busca un elemento con reintento y recarga de página si es necesario"""
@@ -681,16 +968,32 @@ class ScrapingWorker:
                     logger.info(f"📨 Mensaje recibido: {mensaje.get('IdFactura', 'Sin ID')}")
                     
                     # Procesar mensaje
-                    self._process_single_message(mensaje)
+                    logger.info("🔄 Iniciando procesamiento del mensaje...")
+                    resultado = self._process_single_message(mensaje)
+                    logger.info(f"📊 Resultado del procesamiento: {resultado}")
+                    
+                    # Si el procesamiento fue exitoso, enviar mensaje de validación
+                    if resultado:
+                        logger.info("📤 Enviando mensaje de validación...")
+                        if self._enviar_mensaje_validacion(mensaje):
+                            logger.info("✅ Mensaje de validación enviado exitosamente")
+                        else:
+                            logger.warning("⚠️ Error enviando mensaje de validación")
+                    else:
+                        logger.warning("⚠️ Procesamiento falló, no se enviará mensaje de validación")
                     
                     # Confirmar procesamiento
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     logger.info("✅ Mensaje procesado exitosamente")
+                    logger.info("⏳ Esperando siguiente mensaje...")
                     
                 except Exception as e:
                     logger.error(f"❌ Error procesando mensaje: {e}")
+                    logger.error(f"   • Tipo de error: {type(e).__name__}")
+                    logger.error(f"   • Detalles: {str(e)}")
                     # Rechazar mensaje
                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                    logger.info("⏳ Esperando siguiente mensaje...")
             
             # Configurar consumo de mensajes
             self.processor.rabbitmq_channel.basic_qos(prefetch_count=1)
@@ -700,7 +1003,32 @@ class ScrapingWorker:
             )
             
             logger.info("⏳ Esperando mensajes...")
-            self.processor.rabbitmq_channel.start_consuming()
+            logger.info("🔄 Worker en modo continuo - procesará mensajes indefinidamente")
+            
+            # Bucle continuo para mantener el worker funcionando
+            while True:
+                try:
+                    self.processor.rabbitmq_channel.start_consuming()
+                except KeyboardInterrupt:
+                    logger.info("⏹️ Deteniendo worker por interrupción del usuario...")
+                    self.processor.rabbitmq_channel.stop_consuming()
+                    break
+                except Exception as e:
+                    logger.error(f"❌ Error en start_consuming: {e}")
+                    logger.info("🔄 Reintentando conexión en 5 segundos...")
+                    time.sleep(5)
+                    # Reintentar conexión
+                    if self.processor.connect_rabbitmq():
+                        logger.info("✅ Reconectado a RabbitMQ, continuando...")
+                        # Reconfigurar consumo después de reconectar
+                        self.processor.rabbitmq_channel.basic_qos(prefetch_count=1)
+                        self.processor.rabbitmq_channel.basic_consume(
+                            queue=Config.RABBITMQ_QUEUE,
+                            on_message_callback=callback
+                        )
+                    else:
+                        logger.error("❌ No se pudo reconectar a RabbitMQ, reintentando en 10 segundos...")
+                        time.sleep(10)
                 
         except Exception as e:
             logger.error(f"❌ Error en procesamiento de mensajes: {e}")
@@ -708,6 +1036,23 @@ class ScrapingWorker:
     def _process_single_message(self, mensaje):
         """Procesa un mensaje individual"""
         try:
+            # Verificar si es un mensaje de validación (ignorarlo)
+            if mensaje.get('TipoMensaje') == 'validacion_excel':
+                logger.info("📤 Mensaje de validación detectado - ignorando (no procesar)")
+                logger.info(f"   • ID: {mensaje.get('IdFactura', 'Sin ID')}")
+                logger.info(f"   • Estado: {mensaje.get('Estado', 'Sin estado')}")
+                logger.info("✅ Mensaje de validación ignorado correctamente")
+                return True  # Retornar True para continuar esperando
+            
+            # Verificar y reinicializar driver si es necesario
+            if not self.processor.driver:
+                logger.info("🔄 Driver no disponible, reinicializando...")
+                self.processor.setup_selenium_driver()
+                if not self.processor.driver:
+                    logger.error("❌ No se pudo reinicializar el driver")
+                    return False
+                logger.info("✅ Driver reinicializado exitosamente")
+            
             # Mostrar información completa del mensaje recibido
             logger.info("📋 INFORMACIÓN COMPLETA DEL MENSAJE:")
             logger.info(f"   • Tipo de mensaje: {type(mensaje)}")
@@ -741,6 +1086,10 @@ class ScrapingWorker:
                 logger.error(f"❌ No se encontró URL para aseguradora '{nombre_aseguradora}'")
                 return False
                 
+            # Limpiar caché de búsquedas al cambiar de aseguradora
+            logger.info("🧹 Limpiando caché de búsquedas para nueva aseguradora...")
+            self.processor._limpiar_cache_busquedas()
+            
             # Ejecutar login una sola vez para la aseguradora
             if not self.processor.execute_login(url_info, mensaje):
                 logger.error("❌ Error en login")
@@ -748,8 +1097,13 @@ class ScrapingWorker:
             
             # Procesar cada cliente del array
             clientes_procesados = 0
+            clientes_exitosos = 0
             total_clientes = len(mensaje.get('Clientes', []))
             logger.info(f"📋 Procesando {total_clientes} clientes...")
+            
+            # Guardar estadísticas para el mensaje de validación
+            self._clientes_procesados = total_clientes
+            self._clientes_exitosos = 0
             
             for i, cliente in enumerate(mensaje.get('Clientes', [])):
                 try:
@@ -777,13 +1131,28 @@ class ScrapingWorker:
                             procesador_especifico = crear_procesador_oauth2(self.processor.db_manager)
                             logger.info("✅ Procesador específico creado correctamente")
                             
+                            # Pasar la función de guardar errores al procesador específico
+                            procesador_especifico.set_error_handler(self.processor._guardar_cliente_con_error)
+                            
+                            # Pasar las funciones de caché al procesador específico
+                            procesador_especifico.set_cache_functions(
+                                self.processor._obtener_datos_del_cache,
+                                self.processor._guardar_en_cache
+                            )
+                            
                             # Usar el procesador específico que maneja toda la lógica
                             logger.info("🔄 Iniciando procesamiento con procesador específico...")
                             if procesador_especifico.procesar_oauth2_completo(self.processor.driver, cliente):
                                 clientes_procesados += 1
+                                clientes_exitosos += 1
+                                self._clientes_exitosos += 1
                                 logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador específico")
                             else:
                                 logger.error(f"❌ Error procesando cliente {i+1} con procesador específico")
+                                # Guardar cliente con error en base de datos
+                                error_msg = f"Error en procesamiento con procesador específico OAuth2 para cliente {i+1}"
+                                if not self.processor._guardar_cliente_con_error(cliente, error_msg):
+                                    logger.error("❌ Error guardando cliente con error en base de datos")
                                 
                         except ImportError as e:
                             logger.error(f"❌ Error importando procesador específico: {e}")
@@ -794,9 +1163,15 @@ class ScrapingWorker:
                                 cliente
                             ):
                                 clientes_procesados += 1
+                                clientes_exitosos += 1
+                                self._clientes_exitosos += 1
                                 logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
                             else:
                                 logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
+                                # Guardar cliente con error en base de datos
+                                error_msg = f"Error en procesamiento con procesador genérico (fallback) para cliente {i+1}"
+                                if not self.processor._guardar_cliente_con_error(cliente, error_msg):
+                                    logger.error("❌ Error guardando cliente con error en base de datos")
                         except Exception as e:
                             logger.error(f"❌ Error ejecutando procesador específico: {e}")
                             # Fallback a procesador genérico
@@ -806,9 +1181,15 @@ class ScrapingWorker:
                                 cliente
                             ):
                                 clientes_procesados += 1
+                                clientes_exitosos += 1
+                                self._clientes_exitosos += 1
                                 logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
                             else:
                                 logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
+                                # Guardar cliente con error en base de datos
+                                error_msg = f"Error ejecutando procesador específico: {str(e)}"
+                                if not self.processor._guardar_cliente_con_error(cliente, error_msg):
+                                    logger.error("❌ Error guardando cliente con error en base de datos")
                     else:
                         # Para otras aseguradoras, usar procesador genérico
                         logger.info(f"🔄 Usando procesador genérico para aseguradora: '{url_info.get('nombre')}'")
@@ -818,15 +1199,42 @@ class ScrapingWorker:
                             cliente
                         ):
                             clientes_procesados += 1
+                            clientes_exitosos += 1
+                            self._clientes_exitosos += 1
                             logger.info(f"✅ Cliente {i+1} procesado exitosamente")
                         else:
                             logger.error(f"❌ Error procesando cliente {i+1}")
+                            # Guardar cliente con error en base de datos
+                            error_msg = f"Error en procesamiento con procesador genérico para cliente {i+1}"
+                            if not self.processor._guardar_cliente_con_error(cliente, error_msg):
+                                logger.error("❌ Error guardando cliente con error en base de datos")
                 
                 except Exception as e:
                     logger.error(f"❌ Error procesando cliente {i+1}: {e}")
+                    # Guardar cliente con error en base de datos
+                    error_msg = f"Error general procesando cliente {i+1}: {str(e)}"
+                    if not self.processor._guardar_cliente_con_error(cliente, error_msg):
+                        logger.error("❌ Error guardando cliente con error en base de datos")
                     continue
             
             logger.info(f"✅ Procesamiento completado: {clientes_procesados}/{total_clientes} clientes procesados exitosamente")
+            
+            # Enviar mensaje de validación a RabbitMQ después del procesamiento
+            logger.info("📤 Enviando mensaje de validación a RabbitMQ...")
+            if self._enviar_mensaje_validacion(mensaje):
+                logger.info("✅ Mensaje de validación enviado exitosamente")
+            else:
+                logger.warning("⚠️ Error enviando mensaje de validación, pero continuando...")
+            
+            # Cerrar completamente el navegador después de procesar cada mensaje
+            logger.info("🔒 Cerrando navegador después del procesamiento...")
+            logger.info("🔄 Cerrando navegador completamente para el siguiente mensaje")
+            
+            if not self.processor.limpiar_browser(limpieza_profunda=True):
+                logger.warning("⚠️ Error cerrando el navegador, pero continuando...")
+            else:
+                logger.info("✅ Navegador cerrado exitosamente, se abrirá uno nuevo para el siguiente mensaje")
+            
             return clientes_procesados > 0
             
         except Exception as e:
@@ -873,6 +1281,87 @@ class ScrapingWorker:
         except Exception as e:
             logger.error(f"❌ Error construyendo nombre completo: {e}")
             return None
+    
+    def _enviar_mensaje_validacion(self, mensaje_original):
+        """Envía un mensaje de validación después de procesar un mensaje"""
+        try:
+            logger.info("📤 Enviando mensaje de validación...")
+            
+            # Obtener el nombre de la aseguradora del mensaje original
+            nombre_aseguradora = None
+            if 'Clientes' in mensaje_original and mensaje_original['Clientes']:
+                nombre_aseguradora = mensaje_original['Clientes'][0].get('NombreCompleto')
+            else:
+                nombre_aseguradora = mensaje_original.get('NombreCompleto')
+            
+            if not nombre_aseguradora:
+                logger.warning("⚠️ No se pudo obtener el nombre de la aseguradora para el mensaje de validación")
+                return False
+            
+            # Obtener información del procesamiento
+            total_clientes = len(mensaje_original.get('Clientes', []))
+            clientes_procesados = getattr(self, '_clientes_procesados', 0)
+            clientes_exitosos = getattr(self, '_clientes_exitosos', 0)
+            
+            # Determinar estado del procesamiento
+            if clientes_exitosos == total_clientes and total_clientes > 0:
+                estado = "PROCESADO_EXITOSAMENTE"
+                observaciones = f"Todos los clientes procesados exitosamente ({clientes_exitosos}/{total_clientes})"
+            elif clientes_exitosos > 0:
+                estado = "PROCESADO_PARCIALMENTE"
+                observaciones = f"Procesamiento parcial: {clientes_exitosos}/{total_clientes} clientes exitosos"
+            else:
+                estado = "PROCESADO_CON_ERRORES"
+                observaciones = f"Procesamiento con errores: 0/{total_clientes} clientes exitosos"
+            
+            # Crear mensaje de validación
+            mensaje_validacion = {
+                "IdFactura": f"VALIDACION-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "TipoMensaje": "validacion_excel",
+                "FechaProcesamiento": datetime.now().isoformat(),
+                "MensajeOriginal": mensaje_original.get('IdFactura', 'Sin ID'),
+                "IdAseguradora": mensaje_original.get('IdAseguradora'),
+                "Aseguradora": nombre_aseguradora,
+                "TotalClientes": total_clientes,
+                "ClientesExitosos": clientes_exitosos,
+                "ClientesConError": total_clientes - clientes_exitosos,
+                "Estado": estado,
+                "Observaciones": observaciones,
+                "Accion": "GENERAR_REPORTE_VALIDACION"
+            }
+            
+            # Enviar mensaje de validación
+            message_body = json.dumps(mensaje_validacion, ensure_ascii=False)
+            
+            self.processor.rabbitmq_channel.basic_publish(
+                exchange="validacion_excel_exchange",
+                routing_key=Config.RABBITMQ_ROUTING_KEY,
+                body=message_body,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # Hacer el mensaje persistente
+                    content_type='application/json',
+                    message_id=f"VALIDACION-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                    timestamp=int(datetime.now().timestamp())
+                )
+            )
+            
+            logger.info("✅ Mensaje de validación enviado exitosamente")
+            logger.info(f"   • ID de validación: {mensaje_validacion['IdFactura']}")
+            logger.info(f"   • Tipo: {mensaje_validacion['TipoMensaje']}")
+            logger.info(f"   • Aseguradora: {nombre_aseguradora}")
+            logger.info(f"   • Estado: {mensaje_validacion['Estado']}")
+            logger.info(f"   • Total clientes: {mensaje_validacion['TotalClientes']}")
+            logger.info(f"   • Clientes exitosos: {mensaje_validacion['ClientesExitosos']}")
+            logger.info(f"   • Clientes con error: {mensaje_validacion['ClientesConError']}")
+            logger.info(f"   • Acción: {mensaje_validacion['Accion']}")
+            logger.info(f"   • Exchange: validacion_excel_exchange")
+            logger.info(f"   • Routing Key: {Config.RABBITMQ_ROUTING_KEY}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error enviando mensaje de validación: {e}")
+            return False
 
 def main():
     """Función principal del worker"""

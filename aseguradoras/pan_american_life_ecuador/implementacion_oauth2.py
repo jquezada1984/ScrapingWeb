@@ -22,12 +22,58 @@ class PanAmericanLifeEcuadorOAuth2Processor:
     def __init__(self, db_manager):
         self.db_manager = db_manager
         self.logger = logging.getLogger(__name__)
+        self.error_handler = None
+        self.cache_get_function = None
+        self.cache_save_function = None
         self.logger.info("🚀 Procesador OAuth2 PAN AMERICAN LIFE DE ECUADOR inicializado")
+    
+    def set_error_handler(self, error_handler_func):
+        """Establece la función para manejar errores"""
+        self.error_handler = error_handler_func
+        self.logger.info("✅ Error handler configurado en procesador específico")
+    
+    def set_cache_functions(self, cache_get_func, cache_save_func):
+        """Establece las funciones para manejar el caché"""
+        self.cache_get_function = cache_get_func
+        self.cache_save_function = cache_save_func
+        self.logger.info("✅ Cache functions configuradas en procesador específico")
     
     def procesar_oauth2_completo(self, driver, datos_mensaje):
         """Procesa el flujo OAuth2 completo para PAN AMERICAN LIFE DE ECUADOR"""
         try:
             self.logger.info("🔐 Iniciando procesamiento OAuth2 completo para PAN AMERICAN LIFE DE ECUADOR")
+            
+            # Obtener NumDocIdentidad para verificar caché
+            num_doc_identidad = datos_mensaje.get('NumDocIdentidad')
+            if not num_doc_identidad:
+                self.logger.error("❌ No se encontró NumDocIdentidad en los datos del mensaje")
+                return False
+            
+            # Verificar si ya tenemos estos datos en caché
+            if self.cache_get_function:
+                datos_cache = self.cache_get_function(num_doc_identidad)
+                if datos_cache:
+                    # Usar datos del caché
+                    self.logger.info("✅ Usando datos del caché para evitar búsqueda repetida")
+                    
+                    # Verificar si hay error en los datos del caché
+                    if 'error' in datos_cache:
+                        self.logger.error(f"❌ Error en datos del caché: {datos_cache['error']}")
+                        # Guardar cliente con error en base de datos
+                        if self.error_handler:
+                            self.error_handler(datos_mensaje, datos_cache['error'])
+                        return False
+                    
+                    # Guardar en base de datos usando datos del caché
+                    if not self._guardar_cliente_en_bd(datos_cache, datos_mensaje):
+                        self.logger.error("❌ Error guardando en base de datos con datos del caché")
+                        return False
+                    
+                    self.logger.info("✅ Procesamiento OAuth2 completo exitoso usando caché")
+                    return True
+            
+            # Si no está en caché, proceder con la búsqueda normal
+            self.logger.info("🔍 NumDocIdentidad no encontrado en caché, procediendo con búsqueda en página...")
             
             # Verificar si ya estamos en la página correcta (después del login)
             if not self._verificar_pagina_correcta(driver):
@@ -64,6 +110,10 @@ class PanAmericanLifeEcuadorOAuth2Processor:
             if not resultado:
                 self.logger.error("❌ No se pudo capturar información de la tabla")
                 return False
+            
+            # Guardar en caché para futuras referencias
+            if self.cache_save_function:
+                self.cache_save_function(num_doc_identidad, resultado)
             
             # Guardar en base de datos
             if not self._guardar_cliente_en_bd(resultado, datos_mensaje):
@@ -876,6 +926,15 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                                 else:
                                     self.logger.warning(f"⚠️ Cliente encontrado pero status no es 'Activo': {status_texto}")
                                     
+                                    # Guardar cliente con error si hay error handler disponible
+                                    if self.error_handler:
+                                        error_msg = f"Cliente '{nombre_completo}' encontrado pero status no es 'Activo': {status_texto}"
+                                        self.logger.info(f"💾 Guardando cliente con error: {error_msg}")
+                                        if self.error_handler(datos_mensaje, error_msg):
+                                            self.logger.info("✅ Cliente con error guardado exitosamente")
+                                        else:
+                                            self.logger.error("❌ Error guardando cliente con error")
+                                    
                             except Exception as e:
                                 self.logger.error(f"❌ Error extrayendo datos de la fila: {e}")
                                 continue
@@ -887,10 +946,30 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                     continue
             
             self.logger.warning(f"⚠️ Cliente '{nombre_completo}' no encontrado en la tabla")
+            
+            # Guardar cliente con error si hay error handler disponible
+            if self.error_handler:
+                error_msg = f"Cliente '{nombre_completo}' no encontrado en la tabla de resultados"
+                self.logger.info(f"💾 Guardando cliente con error: {error_msg}")
+                if self.error_handler(datos_mensaje, error_msg):
+                    self.logger.info("✅ Cliente con error guardado exitosamente")
+                else:
+                    self.logger.error("❌ Error guardando cliente con error")
+            
             return None
             
         except Exception as e:
             self.logger.error(f"❌ Error capturando tabla y buscando cliente: {e}")
+            
+            # Guardar cliente con error si hay error handler disponible
+            if self.error_handler:
+                error_msg = f"Error capturando tabla y buscando cliente: {str(e)}"
+                self.logger.info(f"💾 Guardando cliente con error: {error_msg}")
+                if self.error_handler(datos_mensaje, error_msg):
+                    self.logger.info("✅ Cliente con error guardado exitosamente")
+                else:
+                    self.logger.error("❌ Error guardando cliente con error")
+            
             return None
     
     def _actualizar_factura_cliente(self, datos_fila, datos_mensaje):
