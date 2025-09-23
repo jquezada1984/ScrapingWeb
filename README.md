@@ -9,16 +9,26 @@ scraping_web/
 ├── src/                          # Código fuente principal
 │   ├── __init__.py
 │   ├── config.py                 # Configuración y variables de entorno
-│   ├── database.py               # Gestión de conexión a SQL Server externo
-│   ├── rabbitmq_client.py        # Cliente para RabbitMQ externo
+│   ├── database.py               # Gestión de conexión a SQL Server
+│   ├── rabbitmq_client.py        # Cliente para RabbitMQ
 │   ├── scraper.py                # Motor de scraping web
 │   └── scraping_worker.py        # Worker principal que coordina todo
+├── aseguradoras/                 # Procesadores específicos por aseguradora
+│   └── pan_american_life_ecuador/
+│       ├── implementacion_oauth2.py
+│       └── config.py
 ├── run_production_worker.py      # Worker de producción principal (SIEMPRE ACTIVO)
 ├── requirements.txt              # Dependencias de Python
-├── config.env.example            # Ejemplo de configuración local
-├── docker.env.example            # Ejemplo de configuración Docker
-├── docker-compose.yml            # Configuración Docker (solo app Python)
-├── Dockerfile                    # Dockerfile para containerización
+├── config_neptuno.env            # Configuración local específica
+├── docker.env                       # Configuración para Docker (servicios externos)
+├── docker-compose.yml            # Orquestación de servicios Docker (sin RabbitMQ)
+├── Dockerfile                    # Imagen Docker del worker (con Chrome)
+├── docker-entrypoint.sh          # Script de inicio Docker
+├── start-docker.bat              # Script de inicio Windows
+├── stop-docker.bat               # Script de parada Windows
+├── DOCKER_README.md              # Documentación Docker
+├── DOCKER_CONFIGURATION.md       # Documentación de configuración Docker
+├── .dockerignore                 # Archivos a ignorar en Docker
 ├── README.md                     # Documentación completa
 └── .gitignore                    # Archivos a ignorar en Git
 ```
@@ -32,33 +42,59 @@ scraping_web/
 - **Configuración Flexible**: Variables de entorno para personalizar el comportamiento
 - **Logging Completo**: Registro detallado de todas las operaciones
 
+## 📊 Estado Actual del Proyecto
+
+### ✅ **Funcionando Correctamente**
+- **Docker**: Imagen construida exitosamente
+- **RabbitMQ**: Conexión establecida a servicio externo
+- **SQL Server**: Motor inicializado correctamente
+- **Worker**: Procesador funcionando con caché de URLs
+- **Logging**: Sistema de logs detallado operativo
+
+### ⚠️ **En Desarrollo**
+- **Selenium/Chrome**: Requiere ajustes adicionales para funcionar en Docker
+- **Navegador**: Configuración de ChromeDriver en progreso
+
+### 🔧 **Configuración Actual**
+- **Sin RabbitMQ interno**: Se conecta a servicio externo
+- **SQL Server externo**: DESKTOP-BO3S185:1433
+- **Docker optimizado**: Imagen con Chrome y ODBC Driver
+
 ## 📋 Requisitos Previos
 
 ### Software Necesario
 
-1. **Python 3.8+**
-2. **SQL Server** (servicio externo en otro proyecto)
-3. **RabbitMQ Server** (servicio externo en otro proyecto)
-4. **Microsoft Edge** (recomendado) o **Chrome/Chromium** (para Selenium)
+1. **Docker Desktop** (instalado y ejecutándose)
+2. **Docker Compose** (incluido con Docker Desktop)
+3. **SQL Server** (DESKTOP-BO3S185:1433 - servicio externo)
 
 ### Servicios Externos Requeridos
 
-- **SQL Server**: Debe estar ejecutándose en otro proyecto/contenedor
-- **RabbitMQ**: Debe estar ejecutándose en otro proyecto/contenedor con usuario `admin` y contraseña `admin123`
+- **SQL Server**: Debe estar ejecutándose en DESKTOP-BO3S185:1433
+- **RabbitMQ**: Debe estar ejecutándose en otro proyecto (puerto 5672 y 15672)
 
-### Drivers de SQL Server
+### Configuración de SQL Server
 
-Para Windows, instala el driver ODBC:
-- [Microsoft ODBC Driver 17 for SQL Server](https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server)
+El proyecto está configurado para conectarse a SQL Server externo:
+- **Servidor**: `DESKTOP-BO3S185:1433`
+- **Base de datos**: `NeptunoMedicalAutomatico`
+- **Autenticación**: SQL Server (usuario: `sa`, contraseña: `M@st3r2023`)
+- **Driver**: Microsoft ODBC Driver 17 for SQL Server (incluido en Docker)
 
-### Autenticación de Windows
+## 🛠️ Instalación con Docker
 
-El proyecto está configurado para usar **autenticación de Windows** (Trusted Connection) con SQL Server:
-- **Instancia**: `localhost\MSSQLSERVER01`
-- **Autenticación**: Windows (sin usuario/contraseña)
-- **Permisos**: El usuario de Windows debe tener acceso a la base de datos
+### Prerrequisitos
 
-## 🛠️ Instalación
+- **Docker Desktop** instalado y ejecutándose
+- **Docker Compose** instalado
+- **SQL Server** ejecutándose en DESKTOP-BO3S185:1433
+- **RabbitMQ** ejecutándose en otro proyecto (puerto 5672 y 15672)
+
+### ⚠️ Configuración Actualizada
+
+**IMPORTANTE**: Este proyecto se ejecuta **SIN RabbitMQ interno**. RabbitMQ debe estar ejecutándose en otro proyecto y ser accesible desde el worker.
+
+### Instalación Rápida
 
 1. **Clonar el repositorio**
    ```bash
@@ -66,49 +102,53 @@ El proyecto está configurado para usar **autenticación de Windows** (Trusted C
    cd scraping_web
    ```
 
-2. **Crear entorno virtual**
+2. **Iniciar con Docker (Opción 1: Script de Windows)**
    ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
-   # Linux/Mac
-   source venv/bin/activate
+   # Ejecutar script de inicio
+   start-docker.bat
    ```
 
-3. **Instalar dependencias**
+3. **Iniciar con Docker (Opción 2: Comandos manuales)**
    ```bash
-   pip install -r requirements.txt
+   # Construir e iniciar servicios
+   docker-compose up -d
+   
+   # Ver logs del worker
+   docker-compose logs -f scraping-worker
    ```
 
-4. **Configurar variables de entorno**
-   ```bash
-   # Copiar archivo de ejemplo
-   copy config.env.example .env
-   
-   # Editar .env con tus configuraciones
-   ```
+### Verificar Instalación
+
+- **RabbitMQ Management**: http://localhost:15672 (admin/admin123) - **Servicio externo**
+- **Logs del Worker**: `docker-compose logs -f scraping-worker`
+- **Estado de Contenedores**: `docker-compose ps`
+
+### ⚠️ Notas Importantes
+
+1. **RabbitMQ externo**: Debe estar ejecutándose en otro proyecto
+2. **SQL Server externo**: Debe estar ejecutándose en DESKTOP-BO3S185:1433
+3. **Configuración**: Los archivos `.env` deben tener las credenciales correctas
+4. **Logs**: Revisar logs para verificar conexiones exitosas
 
 ## ⚙️ Configuración
 
-### Variables de Entorno (.env)
+### Variables de Entorno (docker.env)
 
 ```env
-# Configuración de SQL Server (servicio externo)
-SQL_SERVER_HOST=localhost\MSSQLSERVER01
+# Configuración de SQL Server
+SQL_SERVER_HOST=host.docker.internal
 SQL_SERVER_PORT=1433
-SQL_SERVER_DATABASE=scraping_db
-SQL_SERVER_USERNAME=
-SQL_SERVER_PASSWORD=
-SQL_SERVER_TRUSTED_CONNECTION=yes
+SQL_SERVER_DATABASE=NeptunoMedicalAutomatico
+SQL_SERVER_USERNAME=sa
+SQL_SERVER_PASSWORD=M@st3r2023
+SQL_SERVER_TRUSTED_CONNECTION=false
 
-# Configuración de RabbitMQ (servicio externo)
-RABBITMQ_HOST=rabbitmq_externo
+# Configuración de RabbitMQ (servicio en Docker)
+RABBITMQ_HOST=rabbitmq
 RABBITMQ_PORT=5672
 RABBITMQ_USERNAME=admin
 RABBITMQ_PASSWORD=admin123
-RABBITMQ_QUEUE=scraping_tasks
+RABBITMQ_QUEUE=aseguradora_queue
 RABBITMQ_EXCHANGE=aseguradora_exchange
 
 # Configuración de la aplicación
@@ -134,25 +174,27 @@ MAX_RETRIES=3
 
 ## 🚀 Uso
 
-### Guía de Ejecución Paso a Paso
+### Guía de Ejecución con Docker
 
-#### Paso 1: Preparación del Entorno
+#### Paso 1: Inicio Rápido
 ```bash
-# 1. Crear entorno virtual
-python -m venv venv
+# Opción 1: Script de Windows
+start-docker.bat
 
-# 2. Activar entorno virtual
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
+# Opción 2: Comandos manuales
+docker-compose up -d
+```
 
-# 3. Instalar dependencias
-pip install -r requirements.txt
+#### Paso 2: Verificar Servicios
+```bash
+# Ver estado de contenedores
+docker-compose ps
 
-# 4. Configurar variables de entorno
-copy config.env.example .env
-# Editar .env con tus credenciales
+# Ver logs del worker
+docker-compose logs -f scraping-worker
+
+# Acceder a RabbitMQ Management
+# http://localhost:15672 (admin/admin123)
 ```
 
 #### Paso 2: Verificar Conexiones
@@ -199,10 +241,16 @@ python publisher.py --file urls.txt --selenium
 python publisher.py --url "https://ejemplo.com" --selectors selectors.json
 ```
 
-### 🎯 Ejecución en Producción
+### 🎯 Ejecución en Producción con Docker
 ```bash
-# Ejecutar worker de producción (SIEMPRE ACTIVO)
-python run_production_worker.py
+# Iniciar worker de producción (SIEMPRE ACTIVO)
+docker-compose up -d
+
+# Ver logs en tiempo real
+docker-compose logs -f scraping-worker
+
+# Reiniciar worker si es necesario
+docker-compose restart scraping-worker
 ```
 
 ### 🔄 Flujo de Trabajo del Sistema
@@ -213,14 +261,99 @@ python run_production_worker.py
 4. **Caché**: Almacena URLs en memoria para futuras consultas
 5. **Resultado**: Combina información del mensaje con la URL encontrada
 
-### 📋 Comandos de Ejemplo
+### 📋 Comandos de Docker
 
+#### **Comandos Básicos**
 ```bash
 # Iniciar worker de producción (SIEMPRE ACTIVO)
-python run_production_worker.py
+docker-compose up -d
 
-# El worker estará siempre esperando mensajes
-# Presiona Ctrl+C para detenerlo de forma graceful
+# Ver logs en tiempo real
+docker-compose logs -f scraping-worker
+
+# Detener servicios
+docker-compose down
+
+# Reiniciar solo el worker
+docker-compose restart scraping-worker
+
+# Ver estado de contenedores
+docker-compose ps
+```
+
+#### **Comandos de Construcción**
+```bash
+# Construir imagen Docker
+docker-compose build
+
+# Construir sin caché (si hay problemas)
+docker-compose build --no-cache
+
+# Construir imagen específica
+docker build -t neptuno-scraping-worker .
+```
+
+#### **Comandos de Logs y Debugging**
+```bash
+# Ver logs del worker
+docker-compose logs -f scraping-worker
+
+# Ver logs de todos los servicios
+docker-compose logs -f
+
+# Ver logs con timestamp
+docker-compose logs -f -t scraping-worker
+
+# Ver solo errores
+docker-compose logs scraping-worker | grep -E "(❌|ERROR|Error)"
+
+# Ver conexiones exitosas
+docker-compose logs scraping-worker | grep -E "(✅|Conectado|SUCCESS)"
+```
+
+#### **Comandos de Limpieza**
+```bash
+# Detener y eliminar contenedores
+docker-compose down
+
+# Detener y eliminar contenedores + volúmenes
+docker-compose down -v
+
+# Limpiar sistema Docker
+docker system prune -a
+
+# Limpiar imágenes no utilizadas
+docker image prune -a
+```
+
+#### **Comandos de Monitoreo**
+```bash
+# Ver estado de contenedores
+docker-compose ps
+
+# Ver uso de recursos
+docker stats
+
+# Ver información del contenedor
+docker inspect neptuno-scraping-worker
+
+# Ejecutar comando dentro del contenedor
+docker-compose exec scraping-worker bash
+```
+
+#### **Comandos de Troubleshooting**
+```bash
+# Verificar configuración
+docker-compose config
+
+# Ver variables de entorno
+docker-compose exec scraping-worker env
+
+# Verificar conectividad
+docker-compose exec scraping-worker ping host.docker.internal
+
+# Ver logs de construcción
+docker-compose build --progress=plain
 ```
 
 ## 📊 Estructura de la Base de Datos
@@ -441,14 +574,38 @@ Si tienes problemas o preguntas:
 
 ## 📋 Resumen de Comandos Principales
 
+### **Comandos Docker (Recomendado)**
+| Comando | Descripción |
+|---------|-------------|
+| `start-docker.bat` | Iniciar worker con Docker (Windows) |
+| `docker-compose up -d` | Iniciar worker con Docker |
+| `docker-compose logs -f scraping-worker` | Ver logs del worker |
+| `docker-compose ps` | Ver estado de contenedores |
+| `docker-compose restart scraping-worker` | Reiniciar worker |
+| `docker-compose down` | Detener worker |
+
+### **Comandos Locales (Sin Docker)**
 | Comando | Descripción |
 |---------|-------------|
 | `python test_connection.py` | Probar conexiones a SQL Server y RabbitMQ |
-| `python main.py` | Iniciar el worker de scraping |
+| `python run_production_worker.py` | Iniciar el worker de scraping |
 | `python publisher.py --url "URL"` | Publicar tarea única |
 | `python publisher.py --file archivo.txt` | Publicar múltiples URLs |
 | `python quick_start.py` | Prueba rápida completa del sistema |
-| `docker-compose up -d` | Iniciar todo con Docker |
+
+### **Comandos de Construcción Docker**
+| Comando | Descripción |
+|---------|-------------|
+| `docker-compose build` | Construir imagen Docker |
+| `docker-compose build --no-cache` | Construir sin caché |
+| `docker build -t neptuno-scraping-worker .` | Construir imagen específica |
+
+### **Comandos de Limpieza**
+| Comando | Descripción |
+|---------|-------------|
+| `docker-compose down -v` | Detener y limpiar volúmenes |
+| `docker system prune -a` | Limpiar sistema Docker |
+| `docker image prune -a` | Limpiar imágenes no utilizadas |
 
 ## 🎯 Casos de Uso Típicos
 
@@ -485,14 +642,17 @@ python main.py
 python publisher.py --file urls.txt --selenium
 ```
 
-### Escenario 4: Ejecución con Docker
+### Escenario 4: Ejecución con Docker (Recomendado)
 ```bash
-# 1. Configurar .env con servicios externos
+# 1. Configurar docker.env con servicios externos
 # 2. Ejecutar con Docker
 docker-compose up -d
 
 # 3. Ver logs
-docker-compose logs -f scraping_app
+docker-compose logs -f scraping-worker
+
+# 4. Acceder a RabbitMQ Management
+# http://localhost:15672 (admin/admin123)
 ```
 
 ## 🔄 Cambios Implementados
@@ -541,6 +701,42 @@ docker-compose logs -f scraping_app
 - **Verificación de resultados**: Se confirma la URL final después de cada operación
 - **Logs estructurados**: Formato consistente con emojis y jerarquía visual para fácil lectura
 
+## 🐳 Docker Setup
+
+### Archivos de Docker
+
+- **`Dockerfile`**: Imagen del worker con todas las dependencias
+- **`docker-compose.yml`**: Orquestación de servicios (worker + RabbitMQ)
+- **`docker.env`**: Variables de entorno para Docker
+- **`docker-entrypoint.sh`**: Script de inicio con health checks
+- **`start-docker.bat`**: Script de inicio para Windows
+- **`stop-docker.bat`**: Script de parada para Windows
+- **`DOCKER_README.md`**: Documentación completa de Docker
+
+### Comandos Docker Principales
+
+```bash
+# Iniciar servicios
+docker-compose up -d
+
+# Ver logs del worker
+docker-compose logs -f scraping-worker
+
+# Reiniciar worker
+docker-compose restart scraping-worker
+
+# Detener servicios
+docker-compose down
+
+# Limpiar volúmenes
+docker-compose down -v
+```
+
+### Accesos
+
+- **RabbitMQ Management**: http://localhost:15672 (admin/admin123)
+- **SQL Server**: DESKTOP-BO3S185:1433 (desde el host)
+
 ## 🧪 Scripts de Prueba
 
 ### `test_oauth2_flow.py`
@@ -584,3 +780,92 @@ Los logs utilizan un formato estructurado con:
 3. **Control de flujo**: Visibilidad total de las redirecciones OAuth2
 4. **Análisis de fallos**: Fácil identificación de qué estrategia falló
 5. **Monitoreo en tiempo real**: Seguimiento del progreso durante la ejecución
+
+## 🛠️ Comandos Útiles para Troubleshooting
+
+### **Verificar Estado del Sistema**
+```bash
+# Ver estado de contenedores
+docker-compose ps
+
+# Ver logs en tiempo real
+docker-compose logs -f scraping-worker
+
+# Ver uso de recursos
+docker stats
+
+# Verificar configuración
+docker-compose config
+```
+
+### **Debugging de Conexiones**
+```bash
+# Ver logs de conexión a RabbitMQ
+docker-compose logs scraping-worker | grep -E "(RabbitMQ|rabbitmq)"
+
+# Ver logs de conexión a SQL Server
+docker-compose logs scraping-worker | grep -E "(SQL|sql|database)"
+
+# Ver solo errores
+docker-compose logs scraping-worker | grep -E "(❌|ERROR|Error|Exception)"
+
+# Ver conexiones exitosas
+docker-compose logs scraping-worker | grep -E "(✅|SUCCESS|Conectado)"
+```
+
+### **Comandos de Limpieza y Mantenimiento**
+```bash
+# Detener y limpiar todo
+docker-compose down -v
+
+# Limpiar sistema Docker
+docker system prune -a
+
+# Limpiar imágenes no utilizadas
+docker image prune -a
+
+# Reconstruir sin caché
+docker-compose build --no-cache
+```
+
+### **Comandos de Monitoreo Avanzado**
+```bash
+# Ver información detallada del contenedor
+docker inspect neptuno-scraping-worker
+
+# Ejecutar bash dentro del contenedor
+docker-compose exec scraping-worker bash
+
+# Ver variables de entorno
+docker-compose exec scraping-worker env
+
+# Verificar conectividad de red
+docker-compose exec scraping-worker ping host.docker.internal
+```
+
+### **Comandos de Logs Específicos**
+```bash
+# Ver logs con timestamp
+docker-compose logs -f -t scraping-worker
+
+# Ver logs de los últimos 100 líneas
+docker-compose logs --tail=100 scraping-worker
+
+# Ver logs de una fecha específica
+docker-compose logs --since="2025-01-09T10:00:00" scraping-worker
+
+# Ver logs hasta una fecha específica
+docker-compose logs --until="2025-01-09T18:00:00" scraping-worker
+```
+
+### **Comandos de Reinicio y Recuperación**
+```bash
+# Reiniciar solo el worker
+docker-compose restart scraping-worker
+
+# Detener y volver a iniciar
+docker-compose down && docker-compose up -d
+
+# Forzar recreación del contenedor
+docker-compose up -d --force-recreate scraping-worker
+```

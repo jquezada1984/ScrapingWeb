@@ -461,8 +461,21 @@ class PanAmericanLifeEcuadorOAuth2Processor:
             intentos_login = 0
             max_intentos_login = 2
             
-            # Buscar y hacer clic en el botón de login
-            login_button = self._buscar_boton_con_reintento(driver, 'a[title="Inicio de sesión"]', 'Acción a[title="Inicio de sesión"]')
+            # 🌍 CAMBIAR IDIOMA A ESPAÑOL ANTES DEL LOGIN
+            try:
+                self.logger.info("🌍 Cambiando idioma a español...")
+                idioma_espanol = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[role="button"][onclick*="setLanguage(\'es\')"]'))
+                )
+                idioma_espanol.click()
+                self.logger.info("✅ Idioma cambiado a español")
+                time.sleep(2)  # Esperar a que se procese el cambio de idioma
+            except Exception as e:
+                self.logger.warning(f"⚠️ No se pudo cambiar idioma a español: {e}")
+                self.logger.info("🔄 Continuando con idioma actual...")
+            
+            # Buscar y hacer clic en el botón de login (ahora en español)
+            login_button = self._buscar_boton_con_reintento(driver, 'a[title="Inicio de sesión"]', 'Acción botón de login')
             login_button.click()
             self.logger.info("✅ Click ejecutado en: a[title=\"Inicio de sesión\"]")
             
@@ -829,10 +842,14 @@ class PanAmericanLifeEcuadorOAuth2Processor:
             
             # Buscar filas de datos
             filas = tabla.find_elements(By.CSS_SELECTOR, 'tr.RowStylePV')
-            self.logger.info(f"📊 Encontradas {len(filas)} filas de datos")
+            total_registros = len(filas)
+            self.logger.info(f"📊 TOTAL DE REGISTROS RECIBIDOS: {total_registros}")
+            self.logger.info(f"🔄 INICIANDO PROCESAMIENTO DE {total_registros} REGISTROS...")
             
             # Buscar el cliente específico
             for i, fila in enumerate(filas):
+                progreso_actual = i + 1
+                self.logger.info(f"📈 PROGRESO: {progreso_actual}/{total_registros} registros procesados ({(progreso_actual/total_registros)*100:.1f}%)")
                 try:
                     # Re-buscar la fila para evitar elementos stale
                     filas_actualizadas = tabla.find_elements(By.CSS_SELECTOR, 'tr.RowStylePV')
@@ -847,14 +864,27 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                     if len(celdas) >= 8:  # Asegurar que hay suficientes columnas
                         # Intentar diferentes métodos para extraer el texto
                         try:
+                            # Método 1: .text
                             nombre_paciente = celdas[3].text.strip()
+                            self.logger.info(f"      🔍 Método .text: '{nombre_paciente}'")
+                            
                             if not nombre_paciente:
-                                # Si .text está vacío, intentar con innerHTML
+                                # Método 2: innerHTML
                                 nombre_paciente = celdas[3].get_attribute('innerHTML').strip()
+                                self.logger.info(f"      🔍 Método innerHTML: '{nombre_paciente}'")
+                                
+                                # Limpiar HTML tags si existen
+                                import re
+                                nombre_paciente = re.sub(r'<[^>]+>', '', nombre_paciente).strip()
+                                self.logger.info(f"      🔍 Después de limpiar HTML: '{nombre_paciente}'")
+                            
                             if not nombre_paciente:
-                                # Si sigue vacío, intentar con innerText
+                                # Método 3: innerText
                                 nombre_paciente = celdas[3].get_attribute('innerText').strip()
-                        except:
+                                self.logger.info(f"      🔍 Método innerText: '{nombre_paciente}'")
+                                
+                        except Exception as e:
+                            self.logger.error(f"      ❌ Error extrayendo nombre: {e}")
                             nombre_paciente = ""
                         
                         self.logger.info(f"   🔍 Fila {i+1}: '{nombre_paciente}' (celdas: {len(celdas)})")
@@ -867,39 +897,96 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                             except:
                                 self.logger.info(f"      Celda {j}: [ERROR extrayendo texto]")
                         
-                        # Verificar si coincide exactamente con el nombre completo
-                        if nombre_paciente.upper() == nombre_completo.upper():
-                            self.logger.info(f"✅ Cliente encontrado en fila {i+1}")
+                        # Función para normalizar nombres (quitar acentos, espacios extra, etc.)
+                        def normalizar_nombre(nombre):
+                            import re
+                            import unicodedata
+                            # Convertir a mayúsculas
+                            nombre = nombre.upper()
+                            # Quitar acentos
+                            nombre = unicodedata.normalize('NFD', nombre).encode('ascii', 'ignore').decode('ascii')
+                            # Quitar espacios extra y caracteres especiales
+                            nombre = re.sub(r'\s+', ' ', nombre).strip()
+                            # Quitar caracteres no alfanuméricos excepto espacios
+                            nombre = re.sub(r'[^A-Z0-9\s]', '', nombre)
+                            return nombre
+                        
+                        # Normalizar ambos nombres para comparación
+                        nombre_paciente_normalizado = normalizar_nombre(nombre_paciente)
+                        nombre_completo_normalizado = normalizar_nombre(nombre_completo)
+                        
+                        self.logger.info(f"   🔍 COMPARACIÓN DE NOMBRES:")
+                        self.logger.info(f"      • Nombre original buscado: '{nombre_completo}'")
+                        self.logger.info(f"      • Nombre original encontrado: '{nombre_paciente}'")
+                        self.logger.info(f"      • Nombre normalizado buscado: '{nombre_completo_normalizado}'")
+                        self.logger.info(f"      • Nombre normalizado encontrado: '{nombre_paciente_normalizado}'")
+                        
+                        # Verificar si coincide (exacto o parcial)
+                        coincide_exacto = nombre_paciente_normalizado == nombre_completo_normalizado
+                        coincide_parcial = (nombre_completo_normalizado in nombre_paciente_normalizado or 
+                                          nombre_paciente_normalizado in nombre_completo_normalizado)
+                        
+                        if coincide_exacto or coincide_parcial:
+                            tipo_coincidencia = "EXACTA" if coincide_exacto else "PARCIAL"
+                            self.logger.info(f"🎯 ¡CLIENTE ENCONTRADO! ({tipo_coincidencia}) Fila {i+1}/{total_registros} - Procesando datos...")
                             
-                            # EXTRAER TODOS LOS DATOS INMEDIATAMENTE para evitar elementos stale
-                            try:
-                                # Extraer datos de todas las celdas de una vez
-                                datos_celdas = []
-                                for j, celda in enumerate(celdas):
-                                    try:
-                                        texto = celda.text.strip() or celda.get_attribute('innerHTML').strip()
-                                        datos_celdas.append(texto)
-                                    except:
-                                        datos_celdas.append("")
+                                # EXTRAER TODOS LOS DATOS INMEDIATAMENTE para evitar elementos stale
+                                try:
+                                    self.logger.info("🔍 EXTRAYENDO DATOS DE LA FILA ENCONTRADA...")
+                                    
+                                    # Extraer datos de todas las celdas de una vez
+                                    datos_celdas = []
+                                    for j, celda in enumerate(celdas):
+                                        try:
+                                            # Método 1: .text
+                                            texto = celda.text.strip()
+                                            if not texto:
+                                                # Método 2: innerHTML y limpiar
+                                                texto = celda.get_attribute('innerHTML').strip()
+                                                import re
+                                                texto = re.sub(r'<[^>]+>', '', texto).strip()
+                                            if not texto:
+                                                # Método 3: innerText
+                                                texto = celda.get_attribute('innerText').strip()
+                                            
+                                            datos_celdas.append(texto)
+                                            self.logger.info(f"   📋 Celda {j}: '{texto}'")
+                                        except Exception as e:
+                                            self.logger.error(f"   ❌ Error extrayendo celda {j}: {e}")
+                                            datos_celdas.append("")
                                 
-                                self.logger.info(f"📋 Datos extraídos de todas las celdas:")
+                                self.logger.info(f"📊 TOTAL DE CELDAS EXTRAÍDAS: {len(datos_celdas)}")
+                                self.logger.info(f"📋 RESUMEN DE DATOS EXTRAÍDOS:")
                                 for j, dato in enumerate(datos_celdas):
                                     self.logger.info(f"   Celda {j}: '{dato}'")
                                 
                                 # Verificar que el status sea "Activo" - buscar en el span dentro del div
+                                self.logger.info("🔍 VERIFICANDO STATUS DEL CLIENTE...")
                                 try:
+                                    # Método 1: Buscar el span dentro del div verde
                                     status_element = fila_actual.find_element(By.CSS_SELECTOR, ".rectangle-green span")
                                     status_texto = status_element.text.strip()
-                                    self.logger.info(f"   📊 Status encontrado: '{status_texto}'")
-                                except:
-                                    # Fallback: usar datos extraídos
-                                    status_texto = datos_celdas[7] if len(datos_celdas) > 7 else ""
-                                    self.logger.info(f"   📊 Status (fallback): '{status_texto}'")
+                                    self.logger.info(f"   📊 Status encontrado (método 1): '{status_texto}'")
+                                except Exception as e:
+                                    self.logger.warning(f"   ⚠️ Método 1 falló: {e}")
+                                    try:
+                                        # Método 2: Buscar cualquier span con texto "Activo"
+                                        status_element = fila_actual.find_element(By.XPATH, ".//span[contains(text(), 'Activo')]")
+                                        status_texto = status_element.text.strip()
+                                        self.logger.info(f"   📊 Status encontrado (método 2): '{status_texto}'")
+                                    except Exception as e2:
+                                        self.logger.warning(f"   ⚠️ Método 2 falló: {e2}")
+                                        # Método 3: Fallback a datos extraídos
+                                        status_texto = datos_celdas[7] if len(datos_celdas) > 7 else ""
+                                        self.logger.info(f"   📊 Status (fallback): '{status_texto}'")
+                                
+                                self.logger.info(f"🔍 STATUS FINAL: '{status_texto}'")
                                 
                                 if "ACTIVO" in status_texto.upper():
-                                    self.logger.info("✅ Status 'Activo' confirmado")
+                                    self.logger.info("✅ Status 'Activo' confirmado - procediendo con extracción de datos")
                                     
                                     # Crear diccionario con los datos extraídos
+                                    self.logger.info("📋 CREANDO DICCIONARIO DE DATOS...")
                                     datos_fila = {
                                         'poliza': datos_celdas[0] if len(datos_celdas) > 0 else "",  # Póliza
                                         'certificado': datos_celdas[1] if len(datos_celdas) > 1 else "",  # Certificado
@@ -917,12 +1004,32 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                                         self.logger.info(f"   • {key}: {value}")
                                     
                                     # Actualizar la base de datos con los datos encontrados
-                                    if self._actualizar_factura_cliente(datos_fila, datos_mensaje):
-                                        self.logger.info("✅ Base de datos actualizada exitosamente")
-                                    else:
-                                        self.logger.error("❌ Error actualizando base de datos")
-                                    
-                                    return datos_fila
+                                    self.logger.info("💾 ACTUALIZANDO BASE DE DATOS...")
+                                    try:
+                                        if self._actualizar_factura_cliente(datos_fila, datos_mensaje):
+                                            self.logger.info("✅ Base de datos actualizada exitosamente")
+                                            self.logger.info(f"✅ PROCESAMIENTO EXITOSO: Cliente encontrado y procesado en fila {i+1}/{total_registros}")
+                                            return datos_fila
+                                        else:
+                                            self.logger.error("❌ Error actualizando base de datos")
+                                            # Guardar cliente con error
+                                            if self.error_handler:
+                                                error_msg = f"Error actualizando base de datos para cliente '{nombre_completo}'"
+                                                self.logger.info(f"💾 Guardando cliente con error: {error_msg}")
+                                                if self.error_handler(datos_mensaje, error_msg):
+                                                    self.logger.info("✅ Cliente con error guardado exitosamente")
+                                                else:
+                                                    self.logger.error("❌ Error guardando cliente con error")
+                                    except Exception as e:
+                                        self.logger.error(f"❌ Excepción actualizando base de datos: {e}")
+                                        # Guardar cliente con error
+                                        if self.error_handler:
+                                            error_msg = f"Excepción actualizando base de datos para cliente '{nombre_completo}': {str(e)}"
+                                            self.logger.info(f"💾 Guardando cliente con error: {error_msg}")
+                                            if self.error_handler(datos_mensaje, error_msg):
+                                                self.logger.info("✅ Cliente con error guardado exitosamente")
+                                            else:
+                                                self.logger.error("❌ Error guardando cliente con error")
                                 else:
                                     self.logger.warning(f"⚠️ Cliente encontrado pero status no es 'Activo': {status_texto}")
                                     
@@ -939,13 +1046,14 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                                 self.logger.error(f"❌ Error extrayendo datos de la fila: {e}")
                                 continue
                         else:
-                            self.logger.info(f"   ❌ No coincide exactamente: '{nombre_paciente}' != '{nombre_completo}'")
+                            self.logger.info(f"   ❌ No coincide: '{nombre_paciente_normalizado}' != '{nombre_completo_normalizado}'")
                             
                 except Exception as e:
                     self.logger.warning(f"⚠️ Error procesando fila {i+1}: {e}")
                     continue
             
             self.logger.warning(f"⚠️ Cliente '{nombre_completo}' no encontrado en la tabla")
+            self.logger.info(f"📊 RESUMEN FINAL: {total_registros} registros procesados - Cliente no encontrado")
             
             # Guardar cliente con error si hay error handler disponible
             if self.error_handler:

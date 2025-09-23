@@ -28,7 +28,7 @@ services:
       - neptuno-network
 
   selenium:
-    image: selenium/standalone-chrome:latest
+    image: selenium/standalone-chrome:4.15.0
     container_name: selenium
     restart: unless-stopped
     shm_size: 2gb
@@ -42,11 +42,6 @@ services:
       - SE_NODE_OVERRIDE_MAX_SESSIONS=true
       - SE_NODE_MAX_SESSIONS=1
       - SE_NODE_SESSION_TIMEOUT=300
-      - SE_NODE_GRID_URL=http://localhost:4444
-      - SE_NODE_SESSION_RETRY_INTERVAL=1
-      - SE_NODE_SESSION_REQUEST_TIMEOUT=300
-      - SE_NODE_SESSION_QUEUE_SIZE=0
-      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
       - TZ=America/Guayaquil
     volumes:
       - /etc/localtime:/etc/localtime:ro

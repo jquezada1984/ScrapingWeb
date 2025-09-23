@@ -10,6 +10,7 @@ import sys
 import json
 import pika
 import uuid
+import os
 from datetime import datetime
 from src.config import Config
 from src.database import DatabaseManager
@@ -17,8 +18,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # Configurar logging más detallado para producción
@@ -170,23 +171,72 @@ class AseguradoraProcessor:
                 
             logger.info("🔧 Configurando driver de Selenium...")
             
-            # Opciones de Edge para modo headless
-            edge_options = Options()
-            # edge_options.add_argument("--headless")  # Ejecutar sin interfaz gráfica
-            edge_options.add_argument("--no-sandbox")
-            edge_options.add_argument("--disable-dev-shm-usage")
-            edge_options.add_argument("--disable-gpu")
-            edge_options.add_argument("--window-size=1920,1080")
-            edge_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
+            # Opciones de Chrome optimizadas para Docker
+            chrome_options = Options()
             
-            # Reducir logs de Edge
-            edge_options.add_argument("--log-level=3")  # Solo errores críticos
-            edge_options.add_argument("--silent")
-            edge_options.add_argument("--disable-logging")
-            edge_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+            # Configuraciones básicas para Docker
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            # Crear driver de Edge
-            self.driver = webdriver.Edge(options=edge_options)
+            # Configuraciones para VNC (visualización)
+            chrome_options.add_argument('--display=:99')
+            chrome_options.add_argument('--remote-debugging-port=9222')
+            chrome_options.add_argument('--disable-background-timer-throttling')
+            chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+            chrome_options.add_argument('--disable-renderer-backgrounding')
+            
+            # Configuraciones para evitar detección de bot
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            # Configuraciones adicionales para Docker
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-plugins')
+            chrome_options.add_argument('--disable-features=TranslateUI')
+            chrome_options.add_argument('--disable-ipc-flooding-protection')
+            chrome_options.add_argument('--disable-logging')
+            chrome_options.add_argument('--disable-default-apps')
+            chrome_options.add_argument('--disable-sync')
+            chrome_options.add_argument('--disable-translate')
+            chrome_options.add_argument('--hide-scrollbars')
+            chrome_options.add_argument('--mute-audio')
+            
+            # Configuraciones específicas para Selenium Grid
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--allow-running-insecure-content')
+            
+            # Usar Selenium Grid remoto para mejor compatibilidad
+            try:
+                # Intentar conectar al Selenium Grid
+                selenium_url = os.getenv('SELENIUM_REMOTE_URL', 'http://selenium:4444/wd/hub')
+                logger.info(f"🔗 Conectando a Selenium Grid en: {selenium_url}")
+                
+                self.driver = webdriver.Remote(
+                    command_executor=selenium_url,
+                    options=chrome_options
+                )
+                self.driver.implicitly_wait(10)
+                
+                # Ejecutar script para ocultar que es un bot
+                self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+            except Exception as e:
+                logger.warning(f"Error conectando a Selenium Grid: {str(e)}")
+                # Fallback a Chrome local con webdriver-manager
+                from webdriver_manager.chrome import ChromeDriverManager
+                from selenium.webdriver.chrome.service import Service
+                
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.driver.implicitly_wait(10)
+                
+                # Ejecutar script para ocultar que es un bot
+                self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
             self.driver.set_page_load_timeout(30)
             
             # Configurar logging de Selenium para reducir ruido
@@ -198,7 +248,7 @@ class AseguradoraProcessor:
             urllib3_logger = logging.getLogger('urllib3')
             urllib3_logger.setLevel(logging.WARNING)
             
-            logger.info("✅ Driver de Edge configurado correctamente")
+            logger.info("✅ Driver de Chrome configurado correctamente")
             return True
             
         except Exception as e:
@@ -877,16 +927,16 @@ class AseguradoraProcessor:
                     pass
                 
             # Crear nuevo driver
-            logger.info("🔧 Creando nuevo driver de Edge...")
-            edge_options = Options()
-            edge_options.add_argument("--no-sandbox")
-            edge_options.add_argument("--disable-dev-shm-usage")
-            edge_options.add_argument("--window-size=1920,1080")
-            edge_options.add_argument("--disable-blink-features=AutomationControlled")
-            edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            edge_options.add_experimental_option('useAutomationExtension', False)
+            logger.info("🔧 Creando nuevo driver de Chrome...")
+            chrome_options = Options()
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            self.driver = webdriver.Edge(options=edge_options)
+            self.driver = webdriver.Chrome(options=chrome_options)
             self.driver.set_page_load_timeout(30)
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
@@ -1003,32 +1053,53 @@ class ScrapingWorker:
             )
             
             logger.info("⏳ Esperando mensajes...")
-            logger.info("🔄 Worker en modo continuo - procesará mensajes indefinidamente")
+            logger.info("🔄 Worker en modo lote - procesará todos los mensajes disponibles y esperará nuevos")
             
             # Bucle continuo para mantener el worker funcionando
+            # Procesar todos los mensajes disponibles en la cola
+            mensajes_procesados = 0
+            
             while True:
                 try:
-                    self.processor.rabbitmq_channel.start_consuming()
+                    # Obtener un mensaje de la cola (no bloqueante)
+                    method, properties, body = self.processor.rabbitmq_channel.basic_get(queue=Config.RABBITMQ_QUEUE)
+                    
+                    if method is None:
+                        # No hay más mensajes en la cola
+                        if mensajes_procesados > 0:
+                            logger.info(f"📊 RESUMEN FINAL: {mensajes_procesados} mensajes procesados")
+                            logger.info("🛑 Worker completó el procesamiento de todos los mensajes disponibles")
+                            logger.info("⏳ Esperando nuevos mensajes de RabbitMQ...")
+                        else:
+                            logger.info("📭 No hay mensajes en la cola, esperando...")
+                        
+                        # Esperar nuevos mensajes (modo bloqueante)
+                        logger.info("🔄 Worker en modo espera - solo procesará mensajes nuevos")
+                        self.processor.rabbitmq_channel.start_consuming()
+                        break
+                    
+                    # Hay un mensaje, procesarlo
+                    mensajes_procesados += 1
+                    logger.info(f"📨 PROCESANDO MENSAJE {mensajes_procesados} de la cola...")
+                    
+                    # Procesar el mensaje
+                    mensaje = json.loads(body.decode('utf-8'))
+                    if self._process_single_message(mensaje):
+                        # Confirmar que el mensaje fue procesado exitosamente
+                        self.processor.rabbitmq_channel.basic_ack(delivery_tag=method.delivery_tag)
+                        logger.info(f"✅ Mensaje {mensajes_procesados} procesado y confirmado exitosamente")
+                    else:
+                        # Rechazar el mensaje si hubo error
+                        self.processor.rabbitmq_channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                        logger.error(f"❌ Mensaje {mensajes_procesados} rechazado debido a error en procesamiento")
+                        
                 except KeyboardInterrupt:
                     logger.info("⏹️ Deteniendo worker por interrupción del usuario...")
-                    self.processor.rabbitmq_channel.stop_consuming()
                     break
                 except Exception as e:
-                    logger.error(f"❌ Error en start_consuming: {e}")
-                    logger.info("🔄 Reintentando conexión en 5 segundos...")
+                    logger.error(f"❌ Error procesando mensaje: {e}")
+                    logger.info("🔄 Reintentando en 5 segundos...")
                     time.sleep(5)
-                    # Reintentar conexión
-                    if self.processor.connect_rabbitmq():
-                        logger.info("✅ Reconectado a RabbitMQ, continuando...")
-                        # Reconfigurar consumo después de reconectar
-                        self.processor.rabbitmq_channel.basic_qos(prefetch_count=1)
-                        self.processor.rabbitmq_channel.basic_consume(
-                            queue=Config.RABBITMQ_QUEUE,
-                            on_message_callback=callback
-                        )
-                    else:
-                        logger.error("❌ No se pudo reconectar a RabbitMQ, reintentando en 10 segundos...")
-                        time.sleep(10)
                 
         except Exception as e:
             logger.error(f"❌ Error en procesamiento de mensajes: {e}")
@@ -1063,6 +1134,11 @@ class ScrapingWorker:
             nombre_aseguradora = None
             
             if 'Clientes' in mensaje and mensaje['Clientes']:
+                # Contar total de clientes recibidos
+                total_clientes = len(mensaje['Clientes'])
+                logger.info(f"📊 TOTAL DE CLIENTES RECIBIDOS DESDE RABBITMQ: {total_clientes}")
+                logger.info(f"🔄 INICIANDO PROCESAMIENTO DE {total_clientes} CLIENTES...")
+                
                 # Tomar el NombreCompleto del primer cliente
                 primer_cliente = mensaje['Clientes'][0]
                 nombre_aseguradora = primer_cliente.get('NombreCompleto')
@@ -1107,7 +1183,9 @@ class ScrapingWorker:
             
             for i, cliente in enumerate(mensaje.get('Clientes', [])):
                 try:
-                    logger.info(f"👤 Procesando cliente {i+1}/{total_clientes}")
+                    progreso_actual = i + 1
+                    porcentaje = (progreso_actual / total_clientes) * 100
+                    logger.info(f"👤 PROCESANDO CLIENTE {progreso_actual}/{total_clientes} ({porcentaje:.1f}%)")
                     logger.info(f"   • IdFactura: {cliente.get('IdFactura')}")
                     logger.info(f"   • NumDocIdentidad: {cliente.get('NumDocIdentidad')}")
                     
@@ -1146,9 +1224,9 @@ class ScrapingWorker:
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
                                 self._clientes_exitosos += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador específico")
+                                logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador específico")
                             else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador específico")
+                                logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador específico")
                                 # Guardar cliente con error en base de datos
                                 error_msg = f"Error en procesamiento con procesador específico OAuth2 para cliente {i+1}"
                                 if not self.processor._guardar_cliente_con_error(cliente, error_msg):
@@ -1165,9 +1243,9 @@ class ScrapingWorker:
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
                                 self._clientes_exitosos += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
+                                logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador genérico")
                             else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
+                                logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador genérico")
                                 # Guardar cliente con error en base de datos
                                 error_msg = f"Error en procesamiento con procesador genérico (fallback) para cliente {i+1}"
                                 if not self.processor._guardar_cliente_con_error(cliente, error_msg):
@@ -1183,9 +1261,9 @@ class ScrapingWorker:
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
                                 self._clientes_exitosos += 1
-                                logger.info(f"✅ Cliente {i+1} procesado exitosamente con procesador genérico")
+                                logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador genérico")
                             else:
-                                logger.error(f"❌ Error procesando cliente {i+1} con procesador genérico")
+                                logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador genérico")
                                 # Guardar cliente con error en base de datos
                                 error_msg = f"Error ejecutando procesador específico: {str(e)}"
                                 if not self.processor._guardar_cliente_con_error(cliente, error_msg):
@@ -1217,7 +1295,12 @@ class ScrapingWorker:
                         logger.error("❌ Error guardando cliente con error en base de datos")
                     continue
             
-            logger.info(f"✅ Procesamiento completado: {clientes_procesados}/{total_clientes} clientes procesados exitosamente")
+            logger.info(f"📊 RESUMEN FINAL DEL PROCESAMIENTO:")
+            logger.info(f"   • Total de clientes recibidos: {total_clientes}")
+            logger.info(f"   • Clientes procesados exitosamente: {clientes_exitosos}")
+            logger.info(f"   • Clientes con errores: {total_clientes - clientes_exitosos}")
+            logger.info(f"   • Porcentaje de éxito: {(clientes_exitosos/total_clientes)*100:.1f}%")
+            logger.info(f"✅ PROCESAMIENTO COMPLETADO: {clientes_exitosos}/{total_clientes} clientes exitosos")
             
             # Enviar mensaje de validación a RabbitMQ después del procesamiento
             logger.info("📤 Enviando mensaje de validación a RabbitMQ...")
