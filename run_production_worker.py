@@ -11,6 +11,7 @@ import json
 import pika
 import uuid
 import os
+import gc
 from datetime import datetime
 from src.config import Config
 from src.database import DatabaseManager
@@ -50,6 +51,9 @@ class AseguradoraProcessor:
         # Cache de búsquedas por NumDocIdentidad para evitar búsquedas repetidas
         # Estructura: {num_doc_identidad: {'poliza': '...', 'dependiente': '...', 'status': '...'}}
         self.cache_busquedas = {}
+        
+        # Contador de mensajes procesados para limpieza de memoria
+        self.mensajes_procesados = 0
         
         logger.info("🚀 Procesador inicializado con caché de URLs, Selenium y búsquedas")
         logger.info("   • Gestión de sesiones por aseguradora habilitada")
@@ -1308,6 +1312,17 @@ class ScrapingWorker:
                 logger.info("✅ Mensaje de validación enviado exitosamente")
             else:
                 logger.warning("⚠️ Error enviando mensaje de validación, pero continuando...")
+            
+            # Limpiar memoria después del procesamiento
+            logger.info("🧹 Limpiando memoria después del procesamiento...")
+            gc.collect()
+            
+            # Incrementar contador y limpiar caché cada 10 mensajes
+            self.processor.mensajes_procesados += 1
+            if self.processor.mensajes_procesados % 10 == 0:
+                logger.info("🧹 Limpieza profunda de memoria cada 10 mensajes...")
+                self.processor._limpiar_cache_busquedas()
+                gc.collect()
             
             # Cerrar completamente el navegador después de procesar cada mensaje
             logger.info("🔒 Cerrando navegador después del procesamiento...")

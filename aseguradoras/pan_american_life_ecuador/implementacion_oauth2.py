@@ -930,30 +930,30 @@ class PanAmericanLifeEcuadorOAuth2Processor:
                             tipo_coincidencia = "EXACTA" if coincide_exacto else "PARCIAL"
                             self.logger.info(f"🎯 ¡CLIENTE ENCONTRADO! ({tipo_coincidencia}) Fila {i+1}/{total_registros} - Procesando datos...")
                             
-                                # EXTRAER TODOS LOS DATOS INMEDIATAMENTE para evitar elementos stale
-                                try:
-                                    self.logger.info("🔍 EXTRAYENDO DATOS DE LA FILA ENCONTRADA...")
-                                    
-                                    # Extraer datos de todas las celdas de una vez
-                                    datos_celdas = []
-                                    for j, celda in enumerate(celdas):
-                                        try:
-                                            # Método 1: .text
-                                            texto = celda.text.strip()
-                                            if not texto:
-                                                # Método 2: innerHTML y limpiar
-                                                texto = celda.get_attribute('innerHTML').strip()
-                                                import re
-                                                texto = re.sub(r'<[^>]+>', '', texto).strip()
-                                            if not texto:
-                                                # Método 3: innerText
-                                                texto = celda.get_attribute('innerText').strip()
-                                            
-                                            datos_celdas.append(texto)
-                                            self.logger.info(f"   📋 Celda {j}: '{texto}'")
-                                        except Exception as e:
-                                            self.logger.error(f"   ❌ Error extrayendo celda {j}: {e}")
-                                            datos_celdas.append("")
+                            # EXTRAER TODOS LOS DATOS INMEDIATAMENTE para evitar elementos stale
+                            try:
+                                self.logger.info("🔍 EXTRAYENDO DATOS DE LA FILA ENCONTRADA...")
+                                
+                                # Extraer datos de todas las celdas de una vez
+                                datos_celdas = []
+                                for j, celda in enumerate(celdas):
+                                    try:
+                                        # Método 1: .text
+                                        texto = celda.text.strip()
+                                        if not texto:
+                                            # Método 2: innerHTML y limpiar
+                                            texto = celda.get_attribute('innerHTML').strip()
+                                            import re
+                                            texto = re.sub(r'<[^>]+>', '', texto).strip()
+                                        if not texto:
+                                            # Método 3: innerText
+                                            texto = celda.get_attribute('innerText').strip()
+                                        
+                                        datos_celdas.append(texto)
+                                        self.logger.info(f"   📋 Celda {j}: '{texto}'")
+                                    except Exception as e:
+                                        self.logger.error(f"   ❌ Error extrayendo celda {j}: {e}")
+                                        datos_celdas.append("")
                                 
                                 self.logger.info(f"📊 TOTAL DE CELDAS EXTRAÍDAS: {len(datos_celdas)}")
                                 self.logger.info(f"📋 RESUMEN DE DATOS EXTRAÍDOS:")

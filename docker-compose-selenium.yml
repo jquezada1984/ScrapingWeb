@@ -11,6 +11,8 @@ services:
       - ENABLE_SELENIUM=true
       - SELENIUM_REMOTE_URL=http://selenium:4444/wd/hub
       - TZ=America/Guayaquil
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
     volumes:
       - ./logs:/app/logs
       - ./config_neptuno.env:/app/config_neptuno.env:ro
@@ -19,6 +21,12 @@ services:
     shm_size: 2gb
     security_opt:
       - seccomp:unconfined
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
     entrypoint: ["./docker-entrypoint.sh"]
     command: ["python", "run_production_worker.py"]
     depends_on:
