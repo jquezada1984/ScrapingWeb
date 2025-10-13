@@ -242,6 +242,8 @@ python publisher.py --url "https://ejemplo.com" --selectors selectors.json
 ```
 
 ### 🎯 Ejecución en Producción con Docker
+
+#### **Opción 1: Docker Compose Básico (Sin Selenium)**
 ```bash
 # Iniciar worker de producción (SIEMPRE ACTIVO)
 docker-compose up -d
@@ -251,6 +253,36 @@ docker-compose logs -f scraping-worker
 
 # Reiniciar worker si es necesario
 docker-compose restart scraping-worker
+```
+
+#### **Opción 2: Docker Compose con Selenium Grid (RECOMENDADO)**
+```bash
+# Iniciar worker con Selenium Grid incluido
+docker-compose -f docker-compose-selenium.yml up -d
+
+# Ver logs en tiempo real
+docker-compose -f docker-compose-selenium.yml logs -f scraping-worker
+
+# Ver estado de todos los servicios
+docker-compose -f docker-compose-selenium.yml ps
+
+# Acceder a noVNC para ver el navegador
+# Abrir: http://localhost:7900
+```
+
+#### **Scripts de Windows (Automáticos)**
+```bash
+# Iniciar todo el sistema
+start-docker.bat
+
+# Detener todo el sistema
+stop-docker.bat
+
+# Monitorear logs
+monitor-worker.bat
+
+# Desplegar cambios
+deploy-changes.bat
 ```
 
 ### 🔄 Flujo de Trabajo del Sistema
@@ -263,9 +295,9 @@ docker-compose restart scraping-worker
 
 ### 📋 Comandos de Docker
 
-#### **Comandos Básicos**
+#### **Comandos Básicos (Sin Selenium)**
 ```bash
-# Iniciar worker de producción (SIEMPRE ACTIVO)
+# Iniciar worker de producción
 docker-compose up -d
 
 # Ver logs en tiempo real
@@ -281,16 +313,64 @@ docker-compose restart scraping-worker
 docker-compose ps
 ```
 
+#### **Comandos con Selenium Grid (RECOMENDADO)**
+```bash
+# Iniciar worker con Selenium Grid
+docker-compose -f docker-compose-selenium.yml up -d
+
+# Ver logs en tiempo real
+docker-compose -f docker-compose-selenium.yml logs -f scraping-worker
+
+# Ver logs de Selenium
+docker-compose -f docker-compose-selenium.yml logs -f selenium
+
+# Detener todos los servicios
+docker-compose -f docker-compose-selenium.yml down
+
+# Reiniciar solo el worker
+docker-compose -f docker-compose-selenium.yml restart scraping-worker
+
+# Ver estado de todos los contenedores
+docker-compose -f docker-compose-selenium.yml ps
+
+# Acceder a noVNC (ver navegador)
+# Abrir: http://localhost:7900
+```
+
 #### **Comandos de Construcción**
 ```bash
-# Construir imagen Docker
+# Construir imagen Docker básica
 docker-compose build
 
+# Construir imagen con Selenium Grid
+docker-compose -f docker-compose-selenium.yml build
+
 # Construir sin caché (si hay problemas)
-docker-compose build --no-cache
+docker-compose -f docker-compose-selenium.yml build --no-cache
 
 # Construir imagen específica
 docker build -t neptuno-scraping-worker .
+```
+
+#### **Comandos de Testing y Monitoreo**
+```bash
+# Enviar mensaje de prueba
+python send_test_message.py
+
+# Verificar estado de RabbitMQ
+netstat -an | findstr :5672
+
+# Acceder a noVNC (ver navegador en tiempo real)
+# Abrir: http://localhost:7900
+
+# Monitorear logs en tiempo real
+docker-compose -f docker-compose-selenium.yml logs -f
+
+# Ver logs específicos del worker
+docker-compose -f docker-compose-selenium.yml logs -f scraping-worker
+
+# Ver logs de Selenium
+docker-compose -f docker-compose-selenium.yml logs -f selenium
 ```
 
 #### **Comandos de Logs y Debugging**

@@ -5,8 +5,11 @@ from datetime import datetime
 
 def send_test_message():
     try:
-        # Conectar a RabbitMQ
-        connection = pika.BlockingConnection(pika.ConnectionParameters('host.docker.internal', 5672))
+        # Conectar a RabbitMQ con credenciales
+        credentials = pika.PlainCredentials('admin', 'admin123')
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters('localhost', 5672, '/', credentials)
+        )
         channel = connection.channel()
         
         # Crear mensaje de prueba
@@ -19,7 +22,7 @@ def send_test_message():
                 {
                     "IdFactura": "TEST-001",
                     "NumDocIdentidad": "0702094525",
-                    "NombreCompleto": "LORENA ELIZABETH GARCIA ROMERO",
+                    "NombreCompleto": "PAN AMERICAN LIFE DE ECUADOR",
                     "FechaNacimiento": "1990-01-01",
                     "Estado": "Pendiente"
                 }
@@ -37,17 +40,17 @@ def send_test_message():
             )
         )
         
-        print("✅ Mensaje de prueba enviado exitosamente")
-        print(f"📨 Contenido del mensaje:")
-        print(f"   • ID: {mensaje_prueba['IdFactura']}")
-        print(f"   • Cliente: {mensaje_prueba['Clientes'][0]['NombreCompleto']}")
-        print(f"   • Total clientes: {mensaje_prueba['TotalClientes']}")
+        print("Mensaje de prueba enviado exitosamente")
+        print(f"Contenido del mensaje:")
+        print(f"   - ID: {mensaje_prueba['IdFactura']}")
+        print(f"   - Cliente: {mensaje_prueba['Clientes'][0]['NombreCompleto']}")
+        print(f"   - Total clientes: {mensaje_prueba['TotalClientes']}")
         
         connection.close()
         return True
         
     except Exception as e:
-        print(f"❌ Error enviando mensaje de prueba: {e}")
+        print(f"Error enviando mensaje de prueba: {e}")
         return False
 
 if __name__ == "__main__":

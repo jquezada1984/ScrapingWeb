@@ -14,6 +14,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./config_neptuno.env:/app/config_neptuno.env:ro
+      - .:/app  # Montar todo el código fuente para actualizaciones automáticas
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     shm_size: 2gb

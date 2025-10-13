@@ -1035,6 +1035,7 @@ class ScrapingWorker:
                             logger.warning("⚠️ Error enviando mensaje de validación")
                     else:
                         logger.warning("⚠️ Procesamiento falló, no se enviará mensaje de validación")
+                        logger.info("💡 Esto puede ser normal si la aseguradora no está configurada en la base de datos")
                     
                     # Confirmar procesamiento
                     ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -1102,8 +1103,33 @@ class ScrapingWorker:
                     break
                 except Exception as e:
                     logger.error(f"❌ Error procesando mensaje: {e}")
-                    logger.info("🔄 Reintentando en 5 segundos...")
+                    logger.error(f"   • Tipo de error: {type(e).__name__}")
+                    logger.error(f"   • Detalles del error: {str(e)}")
+                    logger.error(f"   • Mensaje que causó el error: {mensaje if 'mensaje' in locals() else 'No disponible'}")
+                    
+                    # Reintentar solo una vez
+                    logger.info("🔄 Reintentando una vez más en 5 segundos...")
                     time.sleep(5)
+                    
+                    try:
+                        logger.info("🔄 Segundo intento de procesamiento...")
+                        if self._process_single_message(mensaje):
+                            # Confirmar que el mensaje fue procesado exitosamente en el segundo intento
+                            self.processor.rabbitmq_channel.basic_ack(delivery_tag=method.delivery_tag)
+                            logger.info(f"✅ Mensaje procesado exitosamente en el segundo intento")
+                        else:
+                            # Rechazar el mensaje si falló en ambos intentos
+                            self.processor.rabbitmq_channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                            logger.error(f"❌ Mensaje rechazado después de 2 intentos fallidos")
+                    except Exception as retry_e:
+                        logger.error(f"❌ Error en el segundo intento: {retry_e}")
+                        logger.error(f"   • Tipo de error: {type(retry_e).__name__}")
+                        logger.error(f"   • Detalles del error: {str(retry_e)}")
+                        # Rechazar el mensaje definitivamente
+                        self.processor.rabbitmq_channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                        logger.error(f"❌ Mensaje rechazado definitivamente después de 2 intentos fallidos")
+                    
+                    logger.info("⏭️ Continuando con el siguiente mensaje...")
                 
         except Exception as e:
             logger.error(f"❌ Error en procesamiento de mensajes: {e}")
@@ -1133,39 +1159,135 @@ class ScrapingWorker:
             logger.info(f"   • Tipo de mensaje: {type(mensaje)}")
             logger.info(f"   • Contenido del mensaje: {mensaje}")
             
-            # Obtener información de la aseguradora
-            # El NombreCompleto está dentro del array Clientes
-            nombre_aseguradora = None
-            
+            # Agrupar clientes por aseguradora
             if 'Clientes' in mensaje and mensaje['Clientes']:
-                # Contar total de clientes recibidos
                 total_clientes = len(mensaje['Clientes'])
                 logger.info(f"📊 TOTAL DE CLIENTES RECIBIDOS DESDE RABBITMQ: {total_clientes}")
                 logger.info(f"🔄 INICIANDO PROCESAMIENTO DE {total_clientes} CLIENTES...")
                 
-                # Tomar el NombreCompleto del primer cliente
-                primer_cliente = mensaje['Clientes'][0]
-                nombre_aseguradora = primer_cliente.get('NombreCompleto')
-                logger.info(f"   • NombreCompleto extraído del primer cliente: '{nombre_aseguradora}' (tipo: {type(nombre_aseguradora)})")
+                # Agrupar clientes por aseguradora
+                clientes_por_aseguradora = {}
+                for cliente in mensaje['Clientes']:
+                    nombre_aseguradora = cliente.get('NombreCompleto')
+                    if nombre_aseguradora:
+                        if nombre_aseguradora not in clientes_por_aseguradora:
+                            clientes_por_aseguradora[nombre_aseguradora] = []
+                        clientes_por_aseguradora[nombre_aseguradora].append(cliente)
+                
+                logger.info(f"📋 CLIENTES AGRUPADOS POR ASEGURADORA:")
+                for aseguradora, clientes in clientes_por_aseguradora.items():
+                    logger.info(f"   • {aseguradora}: {len(clientes)} cliente(s)")
+                
+                # Procesar cada grupo de aseguradora por separado
+                total_procesados = 0
+                total_exitosos = 0
+                
+                for nombre_aseguradora, clientes_grupo in clientes_por_aseguradora.items():
+                    logger.info(f"🏢 PROCESANDO ASEGURADORA: '{nombre_aseguradora}' ({len(clientes_grupo)} cliente(s))")
+                    
+                    # Obtener URL de la aseguradora
+                    logger.info(f"🔍 Buscando URL para aseguradora: '{nombre_aseguradora}'")
+                    url_info = self.processor.db_manager.get_url_aseguradora(nombre_aseguradora)
+                    if not url_info:
+                        logger.warning(f"⚠️ No se encontró URL para aseguradora '{nombre_aseguradora}' - Saltando {len(clientes_grupo)} cliente(s)")
+                        logger.info(f"📝 Para configurar esta aseguradora, agregue una entrada en la tabla 'urls_automatizacion'")
+                        logger.info(f"🔄 Continuando con la siguiente aseguradora...")
+                        continue
+                    
+                    # Procesar clientes de esta aseguradora
+                    resultado_grupo = self._procesar_grupo_aseguradora(url_info, clientes_grupo, mensaje)
+                    if resultado_grupo:
+                        total_exitosos += len(clientes_grupo)
+                    total_procesados += len(clientes_grupo)
+                
+                # Guardar estadísticas finales
+                self._clientes_procesados = total_procesados
+                self._clientes_exitosos = total_exitosos
+                
+                logger.info(f"📊 RESUMEN FINAL: {total_exitosos}/{total_procesados} clientes procesados exitosamente")
+                
+                # Enviar mensaje de validación a RabbitMQ después del procesamiento de todos los grupos
+                logger.info("📤 Enviando mensaje de validación a RabbitMQ...")
+                if self._enviar_mensaje_validacion(mensaje):
+                    logger.info("✅ Mensaje de validación enviado exitosamente")
+                else:
+                    logger.warning("⚠️ Error enviando mensaje de validación, pero continuando...")
+                
+                # Limpiar memoria después del procesamiento
+                logger.info("🧹 Limpiando memoria después del procesamiento...")
+                gc.collect()
+                
+                # Incrementar contador y limpiar caché cada 10 mensajes
+                self.processor.mensajes_procesados += 1
+                if self.processor.mensajes_procesados % 10 == 0:
+                    logger.info("🧹 Limpieza profunda de memoria cada 10 mensajes...")
+                    self.processor._limpiar_cache_busquedas()
+                    gc.collect()
+                
+                return total_exitosos > 0
+                
             else:
-                # Fallback: buscar directamente en el mensaje
+                # Fallback: buscar directamente en el mensaje (para mensajes sin array Clientes)
                 nombre_aseguradora = mensaje.get('NombreCompleto')
                 logger.info(f"   • NombreCompleto extraído directamente: '{nombre_aseguradora}' (tipo: {type(nombre_aseguradora)})")
-            
-            if not nombre_aseguradora:
-                logger.error("❌ No se pudo encontrar NombreCompleto en el mensaje")
-                logger.info("   • Claves disponibles en el mensaje:")
-                for key in mensaje.keys():
-                    logger.info(f"     - {key}: {mensaje[key]}")
-                return False
-    
-            # Obtener URL de la aseguradora
-            logger.info(f"🔍 Buscando URL para aseguradora: '{nombre_aseguradora}'")
-            url_info = self.processor.db_manager.get_url_aseguradora(nombre_aseguradora)
-            if not url_info:
-                logger.error(f"❌ No se encontró URL para aseguradora '{nombre_aseguradora}'")
-                return False
                 
+                if not nombre_aseguradora:
+                    logger.error("❌ No se pudo encontrar NombreCompleto en el mensaje")
+                    logger.info("   • Claves disponibles en el mensaje:")
+                    for key in mensaje.keys():
+                        logger.info(f"     - {key}: {mensaje[key]}")
+                    return False
+                
+                # Obtener URL de la aseguradora
+                logger.info(f"🔍 Buscando URL para aseguradora: '{nombre_aseguradora}'")
+                url_info = self.processor.db_manager.get_url_aseguradora(nombre_aseguradora)
+                if not url_info:
+                    logger.warning(f"⚠️ No se encontró URL para aseguradora '{nombre_aseguradora}' - Saltando este mensaje")
+                    logger.info(f"📝 Para configurar esta aseguradora, agregue una entrada en la tabla 'urls_automatizacion'")
+                    logger.info(f"🔄 El sistema continuará procesando otros mensajes normalmente...")
+                    return False
+                
+                # Crear un cliente único para el fallback
+                cliente_fallback = {
+                    'IdFactura': mensaje.get('IdFactura', 'N/A'),
+                    'NumDocIdentidad': mensaje.get('NumDocIdentidad', 'N/A'),
+                    'PersonaPrimerNombre': mensaje.get('PersonaPrimerNombre', ''),
+                    'PersonaSegundoNombre': mensaje.get('PersonaSegundoNombre', ''),
+                    'PersonaPrimerApellido': mensaje.get('PersonaPrimerApellido', ''),
+                    'PersonaSegundoApellido': mensaje.get('PersonaSegundoApellido', ''),
+                    'NombreCompleto': nombre_aseguradora
+                }
+                
+                # Procesar como un grupo de un solo cliente
+                resultado = self._procesar_grupo_aseguradora(url_info, [cliente_fallback], mensaje)
+                
+                # Enviar mensaje de validación
+                logger.info("📤 Enviando mensaje de validación a RabbitMQ...")
+                if self._enviar_mensaje_validacion(mensaje):
+                    logger.info("✅ Mensaje de validación enviado exitosamente")
+                else:
+                    logger.warning("⚠️ Error enviando mensaje de validación, pero continuando...")
+                
+                return resultado
+            
+            # Cerrar completamente el navegador después de procesar cada mensaje
+            logger.info("🔒 Cerrando navegador después del procesamiento...")
+            logger.info("🔄 Cerrando navegador completamente para el siguiente mensaje")
+            
+            if not self.processor.limpiar_browser(limpieza_profunda=True):
+                logger.warning("⚠️ Error cerrando el navegador, pero continuando...")
+            else:
+                logger.info("✅ Navegador cerrado exitosamente, se abrirá uno nuevo para el siguiente mensaje")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error procesando mensaje individual: {e}")
+            return False
+    
+    def _procesar_grupo_aseguradora(self, url_info, clientes_grupo, mensaje):
+        """Procesa un grupo de clientes de la misma aseguradora"""
+        try:
             # Limpiar caché de búsquedas al cambiar de aseguradora
             logger.info("🧹 Limpiando caché de búsquedas para nueva aseguradora...")
             self.processor._limpiar_cache_busquedas()
@@ -1175,17 +1297,13 @@ class ScrapingWorker:
                 logger.error("❌ Error en login")
                 return False
             
-            # Procesar cada cliente del array
+            # Procesar cada cliente del grupo
             clientes_procesados = 0
             clientes_exitosos = 0
-            total_clientes = len(mensaje.get('Clientes', []))
-            logger.info(f"📋 Procesando {total_clientes} clientes...")
+            total_clientes = len(clientes_grupo)
+            logger.info(f"📋 Procesando {total_clientes} clientes de '{url_info.get('nombre')}'...")
             
-            # Guardar estadísticas para el mensaje de validación
-            self._clientes_procesados = total_clientes
-            self._clientes_exitosos = 0
-            
-            for i, cliente in enumerate(mensaje.get('Clientes', [])):
+            for i, cliente in enumerate(clientes_grupo):
                 try:
                     progreso_actual = i + 1
                     porcentaje = (progreso_actual / total_clientes) * 100
@@ -1227,7 +1345,6 @@ class ScrapingWorker:
                             if procesador_especifico.procesar_oauth2_completo(self.processor.driver, cliente):
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
-                                self._clientes_exitosos += 1
                                 logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador específico")
                             else:
                                 logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador específico")
@@ -1246,7 +1363,6 @@ class ScrapingWorker:
                             ):
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
-                                self._clientes_exitosos += 1
                                 logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador genérico")
                             else:
                                 logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador genérico")
@@ -1264,7 +1380,6 @@ class ScrapingWorker:
                             ):
                                 clientes_procesados += 1
                                 clientes_exitosos += 1
-                                self._clientes_exitosos += 1
                                 logger.info(f"✅ CLIENTE {progreso_actual}/{total_clientes} PROCESADO EXITOSAMENTE con procesador genérico")
                             else:
                                 logger.error(f"❌ ERROR procesando cliente {progreso_actual}/{total_clientes} con procesador genérico")
@@ -1282,7 +1397,6 @@ class ScrapingWorker:
                         ):
                             clientes_procesados += 1
                             clientes_exitosos += 1
-                            self._clientes_exitosos += 1
                             logger.info(f"✅ Cliente {i+1} procesado exitosamente")
                         else:
                             logger.error(f"❌ Error procesando cliente {i+1}")
@@ -1299,44 +1413,16 @@ class ScrapingWorker:
                         logger.error("❌ Error guardando cliente con error en base de datos")
                     continue
             
-            logger.info(f"📊 RESUMEN FINAL DEL PROCESAMIENTO:")
-            logger.info(f"   • Total de clientes recibidos: {total_clientes}")
+            logger.info(f"📊 RESUMEN DEL GRUPO '{url_info.get('nombre')}':")
+            logger.info(f"   • Total de clientes: {total_clientes}")
             logger.info(f"   • Clientes procesados exitosamente: {clientes_exitosos}")
             logger.info(f"   • Clientes con errores: {total_clientes - clientes_exitosos}")
             logger.info(f"   • Porcentaje de éxito: {(clientes_exitosos/total_clientes)*100:.1f}%")
-            logger.info(f"✅ PROCESAMIENTO COMPLETADO: {clientes_exitosos}/{total_clientes} clientes exitosos")
             
-            # Enviar mensaje de validación a RabbitMQ después del procesamiento
-            logger.info("📤 Enviando mensaje de validación a RabbitMQ...")
-            if self._enviar_mensaje_validacion(mensaje):
-                logger.info("✅ Mensaje de validación enviado exitosamente")
-            else:
-                logger.warning("⚠️ Error enviando mensaje de validación, pero continuando...")
-            
-            # Limpiar memoria después del procesamiento
-            logger.info("🧹 Limpiando memoria después del procesamiento...")
-            gc.collect()
-            
-            # Incrementar contador y limpiar caché cada 10 mensajes
-            self.processor.mensajes_procesados += 1
-            if self.processor.mensajes_procesados % 10 == 0:
-                logger.info("🧹 Limpieza profunda de memoria cada 10 mensajes...")
-                self.processor._limpiar_cache_busquedas()
-                gc.collect()
-            
-            # Cerrar completamente el navegador después de procesar cada mensaje
-            logger.info("🔒 Cerrando navegador después del procesamiento...")
-            logger.info("🔄 Cerrando navegador completamente para el siguiente mensaje")
-            
-            if not self.processor.limpiar_browser(limpieza_profunda=True):
-                logger.warning("⚠️ Error cerrando el navegador, pero continuando...")
-            else:
-                logger.info("✅ Navegador cerrado exitosamente, se abrirá uno nuevo para el siguiente mensaje")
-            
-            return clientes_procesados > 0
+            return clientes_exitosos > 0
             
         except Exception as e:
-            logger.error(f"❌ Error procesando mensaje individual: {e}")
+            logger.error(f"❌ Error procesando grupo de aseguradora: {e}")
             return False
     
     def _construir_nombre_completo_cliente(self, datos_cliente):
